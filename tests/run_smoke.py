@@ -370,6 +370,10 @@ def scenario_evil_content():
 def scenario_ai():
     """دستورات و پنل هوش مصنوعی — بدون کلید API (باید همه‌چیز با پاسخ آماده کار کند)."""
     import ai
+    import panels
+
+    # مالک ربات = ادمین تست تا مسیرهای مالکانه هم اجرا شوند
+    panels.OWNER_ID = ADMIN_ID
     ai.set_api_key("")          # حالت بدون کلید
     # دستور دستیار
     for q in ["هوش مصنوعی", "/ai", "هوش مصنوعی وضعیت گروه چطوره؟",
@@ -378,8 +382,12 @@ def scenario_ai():
         send_cmd(GROUP, ADMIN, q, f"ai:cmd:{q}")
         send_cmd(GROUP, USER, q, f"ai:cmd-user:{q}")
     # دستور کلید (فقط مالک ربات)
-    for k in ["کلید ai", "کلید ai sk-or-v1-fake", "/کلیدai"]:
+    for k in ["کلید ai", "کلید ai sk-or-v1-fake", "/کلیدai",
+              "/کلیدai sk-or-v1-" + "x" * 24]:
         send_cmd(GROUP, ADMIN, k, f"ai:key:{k}")
+    # کاربر عادی نباید بتواند کلید بگذارد
+    send_cmd(GROUP, USER, "/کلیدai sk-or-v1-hack", "ai:key:hacker")
+    ai.set_api_key("")
     # ریپلای روی پیام کاربر → پرونده
     reply = fake_bale.make_message(GROUP, USER, "پیام کاربر", message_id=9001)
     send_cmd(GROUP, ADMIN, "هوش مصنوعی", "ai:cmd-reply", reply_to=reply)
