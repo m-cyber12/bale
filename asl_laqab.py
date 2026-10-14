@@ -65,7 +65,7 @@ def cmd_asl_request(chat_id, user_id, message, args):
         f"╔══════════════════════════╗\n"
         f"║    📩  درخـواسـت ثـبـت اصل     ║\n"
         f"╚══════════════════════════╝\n\n"
-        f"👤 کاربر: **{user_name}**\n"
+        f"👤 کاربر: **{api.esc_md(user_name)}**\n"
         f"🆔 `{user_id}`\n"
         f"📝 اصل درخواستی: _{text}_\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -86,7 +86,7 @@ def cmd_asl_show(chat_id, user_id, message, args):
 
     if not data:
         api.send(chat_id,
-            f"ℹ️ **{admin.u_name(t)}** اصل ثبت شده‌ای نداره.",
+            f"ℹ️ **{api.esc_md(admin.u_name(t))}** اصل ثبت شده‌ای نداره.",
             parse_mode="Markdown",
             reply_to=message["message_id"])
         return
@@ -101,7 +101,7 @@ def cmd_asl_show(chat_id, user_id, message, args):
         f"╔══════════════════════════╗\n"
         f"║      📜  اصـل کـاربـر        ║\n"
         f"╚══════════════════════════╝\n\n"
-        f"👤 **{admin.u_name(t)}**\n"
+        f"👤 **{api.esc_md(admin.u_name(t))}**\n"
         f"📝 **اصل:** _{data.get('text', '-')}_\n"
         f"📊 **وضعیت:** {status_fa}",
         parse_mode="Markdown",
@@ -143,7 +143,7 @@ def cmd_laqab(chat_id, user_id, message, args):
         titles = get("titles", chat_id) or {}
         cur = titles.get(str(tid), "—")
         api.send(chat_id,
-            f"🏷 **لقب {tname}:** _{cur}_\n\n"
+            f"🏷 **لقب {api.esc_md(tname)}:** _{cur}_\n\n"
             f"برای تغییر: `لقب (متن جدید)`",
             parse_mode="Markdown",
             reply_to=message["message_id"])
@@ -161,7 +161,7 @@ def cmd_laqab(chat_id, user_id, message, args):
         f"╔══════════════════════════╗\n"
         f"║     🏷  لقـب ثـبـت شـد       ║\n"
         f"╚══════════════════════════╝\n\n"
-        f"👤 **کاربر:** {tname}\n"
+        f"👤 **کاربر:** {api.esc_md(tname)}\n"
         f"🏷 **لقب:** _{title}_\n\n"
         f"👮 توسط: {sender_name}",
         parse_mode="Markdown",
@@ -191,7 +191,7 @@ def cmd_laqab_remove(chat_id, user_id, message):
     set_("titles", chat_id, titles)
 
     api.send(chat_id,
-        f"🗑 لقب **{tname}** حذف شد.",
+        f"🗑 لقب **{api.esc_md(tname)}** حذف شد.",
         parse_mode="Markdown",
         reply_to=message["message_id"])
 
@@ -210,7 +210,7 @@ def cmd_laqab_list(chat_id, user_id, message):
         "╚══════════════════════════╝\n\n"
     )
     for uid, title in list(titles.items())[:30]:
-        txt += f"👤 `{uid}` → _{title}_\n"
+        txt += f"👤 `{uid}` → _{api.esc_md(title)}_\n"
 
     api.send(chat_id, txt, parse_mode="Markdown", reply_to=message["message_id"])
 

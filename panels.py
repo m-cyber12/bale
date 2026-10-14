@@ -240,7 +240,7 @@ def build_group_join_message(chat_id, user_id, user_name, warn_count=0):
     rows.append([btn("✅ عضو شدم", f"gj:check:{user_id}")])
 
     text = (
-        f"سلام {user_name} 👋\n\n"
+        f"سلام {api.esc_md(user_name)} 👋\n\n"
         f"برای اینکه بتونی تو گروه پیام بذاری، "
         f"اول باید تو کانال زیر عضو بشی:\n\n"
         f"📢 {ch_name}\n\n"
@@ -270,6 +270,7 @@ def owner_main_panel(user_id):
         [btn("📢 پیام همگانی", "owner:broadcast")],
         [btn("🎬 گیف ساز", "gif:start")],
         [btn("📊 آمار ربات", "owner:stats")],
+        [btn("🧠 هوش مصنوعی", "ai:main")],
         [btn("📖 راهنمای دستورات", "start:help_full")],
         [btn("❌ بستن", "owner:close")],
     ]
@@ -664,6 +665,16 @@ HELP_TEXTS = {
 # ============================================================
 # پنل اصلی گروه
 # ============================================================
+def _ai_on(chat_id):
+    """آیا هوش مصنوعی برای این گروه فعال است؟"""
+    try:
+        import ai
+        import ai_panel
+        return bool(ai.enabled() and ai_panel.group_settings(chat_id).get("announce", True))
+    except Exception:
+        return False
+
+
 def main_panel(chat_id):
     locks_on = sum(1 for v in (get("locks", chat_id) or {}).values() if v)
     as_on = (get("antispam", chat_id) or {}).get("enabled", False)
@@ -700,7 +711,8 @@ def main_panel(chat_id):
         [btn(f"🚫 بن ({banned_count})", "panel:banned"),
          btn(f"🔇 سکوت ({muted_count})", "panel:muted")],
         [btn("⚠️ اخطارها", "panel:warns"), btn("📋 لیست سیاه", "panel:blacklist")],
-        [btn("🧹 پاکسازی", "panel:clean"), btn("💬 پنل پیوی", "panel:pv_open")],
+        [btn("🧠 هوش مصنوعی", "ai:group"), btn("🧹 پاک‌سازی", "panel:clean")],
+        [btn("💬 پنل پیوی", "panel:pv_open")],
     ]
 
     text = (
@@ -711,7 +723,8 @@ def main_panel(chat_id):
         f"👋 خوش‌آمد {'روشن' if w_on else 'خاموش'}\n"
         f"🌙 شب {'روشن' if nm_on else 'خاموش'} | "
         f"😴 خواب {'روشن' if sleep_on else 'خاموش'}\n"
-        f"📢 عضویت اجباری {'روشن' if gj_on else 'خاموش'}\n\n"
+        f"📢 عضویت اجباری {'روشن' if gj_on else 'خاموش'}\n"
+        f"🧠 هوش مصنوعی {'روشن' if _ai_on(chat_id) else 'خاموش'}\n\n"
         f"🚫 {banned_count} بن | 🔇 {muted_count} سکوت\n\n"
         f"از دکمه‌های زیر استفاده کن 👇"
     )
@@ -792,7 +805,7 @@ def registered_users_panel(chat_id, page=0):
     for uid, info in chunk:
         fname = info.get("first_name", "کاربر")
         uname = info.get("username", "")
-        txt += f"• {fname} — @{uname}\n"
+        txt += f"• {api.esc_md(fname)} — @{api.esc_md(uname)}\n"
 
     if len(items) > per_page:
         txt += f"\nصفحه {page+1} از {total}"
@@ -1219,7 +1232,7 @@ def welcome_panel(chat_id):
     return (
         f"👋 خوش‌آمدگویی\n\n"
         f"وضعیت: {'روشن' if enabled else 'خاموش'}\n"
-        f"متن: {preview[:120]}\n"
+        f"متن: {api.esc_md(str(preview)[:120])}\n"
         f"مدیا: {media_icon}\n"
         f"حذف خودکار: {autodel}s\n\n"
         f"متغیرها: {{name}}، {{group}}، {{bot}}",
@@ -1951,7 +1964,7 @@ def user_group_info_panel(chat_id, group_id):
 
         text = f"👥 {title}\n\n🆔 آیدی: {group_id}\n"
         if uname:
-            text += f"🔗 یوزرنیم: @{uname}\n"
+            text += f"🔗 یوزرنیم: @{api.esc_md(uname)}\n"
         if link:
             text += f"🔗 لینک: {link}\n"
 
@@ -1971,11 +1984,16 @@ def handle_callback(cb):
     cb_id = cb["id"]
     data = cb.get("data", "")
     msg = cb.get("message", {})
-    chat_id = msg["chat"]["id"]
-    chat_type = msg["chat"]["type"]
+    chat = msg.get("chat") or {}
+    chat_id = chat.get("id")
+    if chat_id is None:
+        return
+    chat_type = chat.get("type") or "supergroup"
     msg_id = msg.get("message_id")
-    user = cb["from"]
-    user_id = user["id"]
+    user = cb.get("from") or {}
+    user_id = user.get("id")
+    if user_id is None:
+        return
     first_name = user.get("first_name", "کاربر")
 
     if chat_type == "private":
@@ -2029,6 +2047,7 @@ def handle_callback(cb):
         or data == "panel:tag_menu"
         or data.startswith("tag:")
         or data.startswith("users:page:")
+        or data.startswith("ai:")
         or data.startswith("asl:")
     )
 
@@ -2840,7 +2859,7 @@ def handle_callback(cb):
         for i, (uid, cnt) in enumerate(items, 1):
             m = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
             name = xp_data.get(uid, {}).get("name", "") or f"کاربر {str(uid)[-4:]}"
-            txt += f"{m} {name} — {cnt} پیام\n"
+            txt += f"{m} {api.esc_md(name)} — {cnt} پیام\n"
         api.send(chat_id, txt, parse_mode="Markdown", reply_to=0)
         api.answer_callback(cb_id, "")
         return
@@ -3421,7 +3440,7 @@ def handle_private_callback(cb, cb_id, data, chat_id, msg_id, user):
         is_admin_txt = "بله" if is_bot_admin(user_id) else "خیر"
         txt = f"👤 پروفایل تو\n\nنام: {user.get('first_name', 'کاربر')}\n"
         if uname:
-            txt += f"یوزرنیم: @{uname}\n"
+            txt += f"یوزرنیم: @{api.esc_md(uname)}\n"
         txt += f"آیدی: {user_id}\nتاریخ عضویت: {first}\nادمین ربات: {is_admin_txt}"
         api.send(chat_id, txt, parse_mode="Markdown", reply_to=0)
         api.answer_callback(cb_id, "")

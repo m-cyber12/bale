@@ -47,9 +47,9 @@ def send_bug_report(chat_id, user_id, user_name, text, chat_title=""):
         f"╔══════════════════════╗\n"
         f"🆔 کد گزارش: `#{report_id}`\n"
         f"╚══════════════════════╝\n"
-        f"👤 کاربر: **{user_name}**\n"
+        f"👤 کاربر: **{api.esc_md(user_name)}**\n"
         f"🆔 آیدی: `{user_id}`\n"
-        f"👥 گروه: **{chat_title or '-'}**\n"
+        f"👥 گروه: **{api.esc_md(chat_title or '-')}**\n"
         f"🆔 آیدی گروه: `{chat_id}`\n"
         f"📅 زمان: `{now}`\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -127,7 +127,7 @@ def start_quiz(chat_id, user_id, user_name):
         f"━━━━━━━━━━━━━━━\n"
         f"❓ {q['q']}\n\n"
         f"⏱ ۳۰ ثانیه فرصت\n"
-        f"👤 شروع‌کننده: {user_name}\n"
+        f"👤 شروع‌کننده: {api.esc_md(user_name)}\n"
         f"🆔 `{qid}`",
         markup={"inline_keyboard": rows},
         parse_mode="Markdown")
@@ -179,7 +179,7 @@ def end_quiz(chat_id, qid):
     txt = f"🧠 **نتیجه آزمون**\n"
     txt += f"━━━━━━━━━━━━━━━\n"
     txt += f"❓ {quiz['question']}\n"
-    txt += f"✅ جواب: **{correct_ans}**\n\n"
+    txt += f"✅ جواب: **{api.esc_md(correct_ans)}**\n\n"
 
     if not answered:
         txt += "😐 کسی جواب نداد!"
@@ -274,7 +274,7 @@ def get_weekly_ranking(chat_id):
         name = user_info.get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
         level = user_info.get("level", 1)
         xp = user_info.get("xp", 0)
-        txt += f"{crown} **{name}**\n"
+        txt += f"{crown} **{api.esc_md(name)}**\n"
         txt += f"   💬 {cnt} پیام | 🏅 سطح {level} | ⭐ {xp} XP\n"
     return txt
 
@@ -301,7 +301,7 @@ def get_monthly_ranking(chat_id):
         crown = {1: "👑", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
         user_info = xp_data.get(uid, {})
         name = user_info.get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
-        txt += f"{crown} **{name}** → {cnt} پیام\n"
+        txt += f"{crown} **{api.esc_md(name)}** → {cnt} پیام\n"
     return txt
 
 
@@ -492,7 +492,7 @@ def build_weekly_report(chat_id):
         for i, (uid, cnt) in enumerate(items[:5], 1):
             crown = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
             name = xp_data.get(uid, {}).get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
-            txt += f"{crown} {name} → {cnt} پیام\n"
+            txt += f"{crown} {api.esc_md(name)} → {cnt} پیام\n"
     else:
         txt += "😐 هفته ساکتی بود!"
 
@@ -520,7 +520,7 @@ def send_stats_chart(chat_id, reply_to=None):
     try:
         chat_info = api.get_chat(chat_id)
         if chat_info and chat_info.get("ok"):
-            group_title = chat_info["result"].get("title", "گروه")
+            group_title = api.esc_md(chat_info["result"].get("title", "گروه"))
     except Exception as e:
         print(f"[group_title] {e}")
 
@@ -599,7 +599,7 @@ def send_stats_chart(chat_id, reply_to=None):
         pct = (cnt / total_messages_all * 100) if total_messages_all else 0
         bar_len = min(int(pct / 5), 10)
         bar = "█" * bar_len + "░" * (10 - bar_len)
-        top_text += f"{medals[i]} **{name}**\n"
+        top_text += f"{medals[i]} **{api.esc_md(name)}**\n"
         top_text += f"    💬 `{cnt}` پیام | `{bar}` {pct:.0f}%\n"
 
     if not top_text:
@@ -610,7 +610,7 @@ def send_stats_chart(chat_id, reply_to=None):
     avg_per_day = total / 7 if total else 0
 
     best_day_idx = data.index(max(data)) if data else 0
-    best_day_name = labels[best_day_idx] if labels else "-"
+    best_day_name = api.esc_md(labels[best_day_idx]) if labels else "-"
     best_day_count = max(data) if data else 0
 
     today_top_name = ""
@@ -739,7 +739,7 @@ def send_stats_chart(chat_id, reply_to=None):
     if today_top_name:
         caption += (
             f"⚡ **برترین امروز:**\n"
-            f"   🎯 **{today_top_name}** با `{today_top_count}` پیام\n"
+            f"   🎯 **{api.esc_md(today_top_name)}** با `{today_top_count}` پیام\n"
             f"\n"
         )
 

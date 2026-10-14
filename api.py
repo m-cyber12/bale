@@ -13,7 +13,10 @@ BOT_ID = None
 
 _reply_ctx = threading.local()
 
-_unsupported_methods = set()
+# متدهایی که سرور 501 داده — با TTL، چون یک 501 گذرا نباید
+# برای همیشه یک قابلیت (مثل getChatMember) را خاموش کند
+_unsupported_methods = {}
+_UNSUPPORTED_TTL = 900
 
 
 def set_reply_context(msg_id):
@@ -35,12 +38,63 @@ def get_reply_context():
     return getattr(_reply_ctx, 'msg_id', None)
 
 
+# ============================================================
+# ✅ Escape متن کاربر برای parse_mode="Markdown"
+# ============================================================
+import re as _re
+
+_MD_SPECIAL = _re.compile(r"([_*`\[\]\\])")
+
+
+def esc_md(value):
+    """کاراکترهای ویژه‌ی Markdown را escape می‌کند.
+
+    نام و یوزرنیم کاربر‌ها می‌تواند `_` یا `*` یا `` ` `` داشته باشد
+    (مثل @ali_reza). اگر escape نشود کل پیام با خطای
+    "Can't parse entities" رد می‌شود و کاربر هیچی نمی‌بیند.
+    """
+    if value is None:
+        return ""
+    s = str(value)
+    if not s:
+        return s
+    return _MD_SPECIAL.sub(lambda m: "\\" + m.group(1), s)
+
+
+def esc_html(value):
+    """همان کار esc_md ولی برای parse_mode="HTML"."""
+    if value is None:
+        return ""
+    s = str(value)
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _is_parse_error(r):
+    """آیا خطا مربوط به parse_mode است؟"""
+    if not r or r.get("ok"):
+        return False
+    desc = (r.get("description") or "").lower()
+    return ("parse entities" in desc) or ("can't find end" in desc) or \
+           ("can't find start" in desc) or ("unsupported start tag" in desc)
+
+
+def _plain_retry(method, d):
+    """تلاش دوباره بدون parse_mode تا پیام اصلاً گم نشود."""
+    d2 = dict(d)
+    d2.pop("parse_mode", None)
+    try:
+        return request(method, d2)
+    except Exception:
+        return None
+
+
 # ✅ کش callback ها با TTL
 _answered_cbs = {}
 
 
 def request(method, data=None, timeout=30):
-    if method in _unsupported_methods:
+    _uns_ts = _unsupported_methods.get(method)
+    if _uns_ts and time.time() - _uns_ts < _UNSUPPORTED_TTL:
         return {"ok": False, "error_code": 501, "description": "Method not supported (cached)"}
 
     url = BASE_URL + method
@@ -54,7 +108,7 @@ def request(method, data=None, timeout=30):
             return json.loads(r.read().decode('utf-8'))
     except urllib.error.HTTPError as e:
         if e.code == 501:
-            _unsupported_methods.add(method)
+            _unsupported_methods[method] = time.time()
             return {"ok": False, "error_code": 501, "description": "Not Implemented"}
 
         SILENT_METHODS = (
@@ -161,6 +215,11 @@ def send(chat_id, text, reply_to=None, markup=None, parse_mode=None):
             d["reply_markup"] = json.dumps(_strip_copy_text(markup), ensure_ascii=False)
             r = request("sendMessage", d)
 
+    # ✅ fallback نهایی: parse_mode رد شد → بدون parse_mode بفرست (پیام گم نشه)
+    if _is_parse_error(r) and d.get("parse_mode"):
+        print(f"[send:fallback] parse_mode rejected, sending as plain text")
+        r = _plain_retry("sendMessage", d)
+
     if r and not r.get("ok"):
         print(f"❌ SEND FAIL: chat={chat_id} reply={reply_to} err={r.get('error_code')} desc={r.get('description')} text={text[:60]!r}")
     return r
@@ -180,6 +239,11 @@ def send_no_reply(chat_id, text, parse_mode=None, markup=None):
         if "copy_text" in err_desc or "unknown" in err_desc or "button" in err_desc:
             d["reply_markup"] = json.dumps(_strip_copy_text(markup), ensure_ascii=False)
             r = request("sendMessage", d)
+
+    # ✅ fallback نهایی: parse_mode رد شد → بدون parse_mode بفرست
+    if _is_parse_error(r) and d.get("parse_mode"):
+        print(f"[send:fallback] parse_mode rejected, sending as plain text")
+        r = _plain_retry("sendMessage", d)
 
     return r
 
@@ -216,6 +280,11 @@ def edit_message(chat_id, msg_id, text, markup=None, parse_mode=None):
             print(f"[edit:fallback] copy_text not supported, retrying...")
             d["reply_markup"] = json.dumps(_strip_copy_text(markup), ensure_ascii=False)
             r = request("editMessageText", d)
+
+    # ✅ fallback نهایی: parse_mode رد شد → بدون parse_mode ویرایش کن
+    if _is_parse_error(r) and d.get("parse_mode"):
+        print(f"[edit:fallback] parse_mode rejected, retrying as plain text")
+        r = _plain_retry("editMessageText", d)
 
     return r
 

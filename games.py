@@ -54,7 +54,7 @@ def handle(chat_id, text, user_name, user_id, msg_id):
             return False
         target = game["answer"]
         if n == target:
-            api.send(chat_id, f"🎉 {user_name} درست حدس زد! عدد {target} بود.", reply_to=msg_id)
+            api.send(chat_id, f"🎉 {api.esc_md(user_name)} درست حدس زد! عدد {target} بود.", reply_to=msg_id)
             add_game_win(chat_id, "guess", user_id, user_name)
             stop(chat_id)
         elif n < target:
@@ -65,14 +65,14 @@ def handle(chat_id, text, user_name, user_id, msg_id):
 
     if gtype == "word":
         if text.strip() == game["answer"]:
-            api.send(chat_id, f"🎉 {user_name} درست حدس زد! کلمه «{game['answer']}» بود.", reply_to=msg_id)
+            api.send(chat_id, f"🎉 {api.esc_md(user_name)} درست حدس زد! کلمه «{game['answer']}» بود.", reply_to=msg_id)
             add_game_win(chat_id, "word", user_id, user_name)
             stop(chat_id)
         return True
 
     if gtype == "scramble":
         if text.strip() == game["answer"]:
-            api.send(chat_id, f"🎉 {user_name} برنده شد! کلمه «{game['answer']}» بود.", reply_to=msg_id)
+            api.send(chat_id, f"🎉 {api.esc_md(user_name)} برنده شد! کلمه «{game['answer']}» بود.", reply_to=msg_id)
             add_game_win(chat_id, "scramble", user_id, user_name)
             stop(chat_id)
         return True
@@ -88,13 +88,13 @@ def handle(chat_id, text, user_name, user_id, msg_id):
         elif (player == "🪨" and bot_choice == "✂️") or \
              (player == "📄" and bot_choice == "🪨") or \
              (player == "✂️" and bot_choice == "📄"):
-            result = f"🎉 {user_name} برنده شد!"
+            result = f"🎉 {api.esc_md(user_name)} برنده شد!"
             add_game_win(chat_id, "rps", user_id, user_name)
         else:
             result = "🤖 ربات برنده شد!"
         api.send(chat_id,
             f"🎮 **سنگ کاغذ قیچی**\n\n"
-            f"👤 {user_name}: {player}\n"
+            f"👤 {api.esc_md(user_name)}: {player}\n"
             f"🤖 ربات: {bot_choice}\n\n"
             f"{result}",
             parse_mode="Markdown", reply_to=msg_id)
@@ -132,17 +132,17 @@ def cmd_scramble(chat_id):
 def cmd_dice(chat_id, msg_id, user_name):
     n = random.randint(1, 6)
     faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"]
-    api.send(chat_id, f"🎲 {user_name} تاس انداخت: {faces[n-1]} ({n})")
+    api.send(chat_id, f"🎲 {api.esc_md(user_name)} تاس انداخت: {faces[n-1]} ({n})")
 
 
 def cmd_coin(chat_id, msg_id, user_name):
     side = random.choice(["شیر 🦁", "خط ✏️"])
-    api.send(chat_id, f"🪙 {user_name} سکه انداخت: {side}")
+    api.send(chat_id, f"🪙 {api.esc_md(user_name)} سکه انداخت: {side}")
 
 
 def cmd_joke(chat_id, user_id, user_name, msg_id):
     joke = random.choice(JOKES)
-    api.send(chat_id, f"😂 **جوک برای {user_name}:**\n\n{joke}", parse_mode="Markdown")
+    api.send(chat_id, f"😂 **جوک برای {api.esc_md(user_name)}:**\n\n{joke}", parse_mode="Markdown")
     add_game_win(chat_id, "joke", user_id, user_name)
 
 
@@ -164,7 +164,7 @@ def cmd_tod_panel(chat_id, user_id, user_name, mode="bot"):
     api.send(chat_id,
         f"{title}\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"👤 {user_name}\n\n"
+        f"👤 {api.esc_md(user_name)}\n\n"
         f"کدوم رو انتخاب می‌کنی؟",
         markup={"inline_keyboard": rows},
         parse_mode="Markdown")
@@ -229,7 +229,7 @@ def cmd_leaderboard(chat_id, game_key=None):
                            or data.get("name", "")
                            or f"کاربر {str(uid)[-4:]}")
             w = data.get("wins", 0)
-            txt += f"{medals} **{display_name}** → {w} برد\n"
+            txt += f"{medals} **{api.esc_md(display_name)}** → {w} برد\n"
         api.send(chat_id, txt, parse_mode="Markdown")
     else:
         txt = "🏆 **لیدربرد همه بازی‌ها**\n━━━━━━━━━━━━━━━\n"
@@ -252,7 +252,7 @@ def cmd_leaderboard(chat_id, game_key=None):
                 display_name = (xp_data.get(uid, {}).get("name")
                                or data.get("name", "")
                                or f"کاربر {str(uid)[-4:]}")
-                txt += f"{gname}: **{display_name}** ({data.get('wins',0)})\n"
+                txt += f"{gname}: **{api.esc_md(display_name)}** ({data.get('wins',0)})\n"
                 found = True
         if not found:
             txt += "هنوز کسی توی هیچ بازی‌ای برنده نشده!"
@@ -290,7 +290,7 @@ def cmd_xp_ranking(chat_id):
         name = u.get("name", "کاربر")
         xp = u.get("xp", 0)
         level = u.get("level", 1)
-        txt += f"{medal} **{name}**\n"
+        txt += f"{medal} **{api.esc_md(name)}**\n"
         txt += f"     ⭐ `{xp}` XP | 🏅 سطح `{level}`\n\n"
 
     txt += "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -338,9 +338,9 @@ def cmd_ranking_period(chat_id, period="all"):
         xp = u.get("xp", 0)
         if period == "all":
             level = u.get("level", 1)
-            txt += f"{medal} **{name}**\n     ⭐ `{xp}` XP | 🏅 سطح `{level}`\n\n"
+            txt += f"{medal} **{api.esc_md(name)}**\n     ⭐ `{xp}` XP | 🏅 سطح `{level}`\n\n"
         else:
-            txt += f"{medal} **{name}** → `{xp}` XP\n"
+            txt += f"{medal} **{api.esc_md(name)}** → `{xp}` XP\n"
     txt += "━━━━━━━━━━━━━━━━━━━━━━\n"
     txt += "🏆 _تیم مدیریت آلفا_"
     api.send(chat_id, txt, parse_mode="Markdown")

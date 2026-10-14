@@ -180,7 +180,7 @@ def join_game(chat_id, user_id, user_name):
         "id": user_id, "name": user_name, "alive": True, "role": None
     })
     save_game(chat_id, game)
-    return True, f"✅ {user_name} وارد بازی شد!"
+    return True, f"✅ {api.esc_md(user_name)} وارد بازی شد!"
 
 
 def leave_game(chat_id, user_id):
@@ -197,7 +197,7 @@ def leave_game(chat_id, user_id):
 
     game["players"] = [x for x in game["players"] if x["id"] != user_id]
     save_game(chat_id, game)
-    return True, f"👋 {p['name']} از بازی خارج شد"
+    return True, f"👋 {api.esc_md(p['name'])} از بازی خارج شد"
 
 
 # ============================================================
@@ -269,7 +269,7 @@ def start_game(chat_id, user_id):
                 f"╔══════════════════════╗\n"
                 f"║  {role['emoji']}  نـقـش شـمـا  ║\n"
                 f"╚══════════════════════╝\n\n"
-                f"🎭 **{role['fa']}**\n\n"
+                f"🎭 **{api.esc_md(role['fa'])}**\n\n"
                 f"📖 {role['desc']}{teammates}\n\n"
                 f"_موفق باشی!_ 🍀"
             )
@@ -419,7 +419,7 @@ def night_action(chat_id, user_id, action, target_id):
         save_game(chat_id, game)
         emoji = "🔴" if is_mafia else "🟢"
         status = "مافیا" if is_mafia else "شهروند"
-        return True, f"{emoji} **{target['name']}** {status}ه!"
+        return True, f"{emoji} **{api.esc_md(target['name'])}** {status}ه!"
 
     return False, "❌ اکشن نامعتبر"
 
@@ -459,12 +459,12 @@ def end_night(chat_id):
         victim = get_player(game, killed_id)
         if victim:
             victim["alive"] = False
-            result_text += f"💀 **{victim['name']}** شب گذشته کشته شد!\n"
+            result_text += f"💀 **{api.esc_md(victim['name'])}** شب گذشته کشته شد!\n"
         else:
             result_text += "🌅 امشب کسی کشته نشد.\n"
     elif killed_id and killed_id == saved_id:
         victim = get_player(game, killed_id)
-        result_text += f"💉 دکتر **{victim['name'] if victim else '?'}** رو نجات داد!\n🌅 کسی نمرد.\n"
+        result_text += f"💉 دکتر **{api.esc_md(victim['name'] if victim else '?')}** رو نجات داد!\n🌅 کسی نمرد.\n"
     else:
         result_text += "🌅 امشب کسی کشته نشد.\n"
 
@@ -579,8 +579,8 @@ def end_day_vote(chat_id):
                 f"╔══════════════════════╗\n"
                 f"║   🗳  نـتـیـجـه‌ی رأی   ║\n"
                 f"╚══════════════════════╝\n"
-                f"🚪 **{target['name']}** اخراج شد!\n"
-                f"🎭 نقشش: {role_info['emoji']} **{role_info['fa']}**\n",
+                f"🚪 **{api.esc_md(target['name'])}** اخراج شد!\n"
+                f"🎭 نقشش: {role_info['emoji']} **{api.esc_md(role_info['fa'])}**\n",
                 reply_to=0,
                 parse_mode="Markdown")
 
@@ -620,7 +620,7 @@ def check_game_end(chat_id):
         for p in game["players"]:
             r = ROLES[p["role"]]
             status = "💀" if not p.get("alive") else "✅"
-            text += f"{status} {r['emoji']} **{p['name']}** → {r['fa']}\n"
+            text += f"{status} {r['emoji']} **{api.esc_md(p['name'])}** → {r['fa']}\n"
         api.send(chat_id, text, reply_to=0, parse_mode="Markdown")
         game["state"] = "ended"
         save_game(chat_id, game)
@@ -643,7 +643,7 @@ def check_game_end(chat_id):
         for p in game["players"]:
             r = ROLES[p["role"]]
             status = "💀" if not p.get("alive") else "✅"
-            text += f"{status} {r['emoji']} **{p['name']}** → {r['fa']}\n"
+            text += f"{status} {r['emoji']} **{api.esc_md(p['name'])}** → {r['fa']}\n"
         api.send(chat_id, text, reply_to=0, parse_mode="Markdown")
         game["state"] = "ended"
         save_game(chat_id, game)
@@ -685,7 +685,7 @@ def handle_callback(cb, cb_id, data, chat_id, msg_id, user):
         if ok:
             game = get_game(chat_id)
             if game:
-                players_list = "\n".join([f"└─ {p['name']}" for p in game["players"]])
+                players_list = "\n".join([f"└─ {api.esc_md(p['name'])}" for p in game["players"]])
                 text = (
                     f"{MAFIA_LOGO}\n\n"
                     f"👑 **سازنده:** {game['creator_name']}\n"
@@ -708,7 +708,7 @@ def handle_callback(cb, cb_id, data, chat_id, msg_id, user):
         if ok:
             game = get_game(chat_id)
             if game:
-                players_list = "\n".join([f"└─ {p['name']}" for p in game["players"]])
+                players_list = "\n".join([f"└─ {api.esc_md(p['name'])}" for p in game["players"]])
                 text = (
                     f"{MAFIA_LOGO}\n\n"
                     f"👑 **سازنده:** {game['creator_name']}\n"
@@ -760,7 +760,7 @@ def handle_callback(cb, cb_id, data, chat_id, msg_id, user):
         if ok:
             target = get_player(get_game(chat_id), target_id)
             api.edit_message(chat_id, msg_id,
-                f"✅ **{target['name'] if target else '?'}** رو نجات دادی.\n"
+                f"✅ **{api.esc_md(target['name'] if target else '?')}** رو نجات دادی.\n"
                 "_منتظر بمون تا صبح..._",
                 parse_mode="Markdown")
         return

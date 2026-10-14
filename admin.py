@@ -10,6 +10,40 @@ import locks as lock_mod
 import antispam
 import notify
 
+# 🧠 هوش مصنوعی (اختیاری — اگر نبود، همین پیام‌های آماده فرستاده می‌شود)
+try:
+    import ai_persona
+except Exception as _e:      # pragma: no cover
+    ai_persona = None
+    print(f"[admin] ai_persona لود نشد: {_e}")
+
+
+def _announce(chat_id, action, target_id, target_name, by_name="", reason="",
+              count=None, duration="", fallback=None):
+    """اعلام اقدام مدیریتی: AI اگر ممکن بود، وگرنه متن آماده.
+
+    هرگز خطا نشان داده نمی‌شود؛ اگر AI نبود همان متن قبلی می‌رود.
+    """
+    if fallback is None:
+        fallback = f"✅ انجام شد."
+    if not ai_persona:
+        api.send(chat_id, fallback, parse_mode="Markdown")
+        return
+    try:
+        import ai_panel
+        if not ai_panel.feature_on(chat_id, "announce"):
+            api.send(chat_id, fallback, parse_mode="Markdown")
+            return
+    except Exception:
+        pass
+    try:
+        ai_persona.announce_punish(
+            chat_id, action, target_id, target_name, by_name=by_name,
+            reason=reason, count=count, duration=duration)
+    except Exception as e:
+        print(f"[admin:announce] {e}")
+        api.send(chat_id, fallback, parse_mode="Markdown")
+
 _admin_cache = {}
 _admin_cache_last_cleanup = [0]
 
@@ -264,14 +298,15 @@ def cmd_warn(chat_id, user_id, message):
         except Exception as e:
             print(f"[warn:notify] {e}")
 
-        api.send(chat_id,
-            f"🚫 **{tname}** به دلیل دریافت ۳ اخطار بن شد.",
-            parse_mode="Markdown")
+        _announce(chat_id, "ban", tid, tname,
+                  by_name=sender_name, reason="دریافت ۳ اخطار", count=3,
+                  fallback=f"🚫 **{api.esc_md(tname)}** به دلیل دریافت ۳ اخطار بن شد.")
     else:
-        api.send(chat_id,
-            f"⚠️ **{tname}** اخطار گرفت ({count}/3)\n\n"
-            f"🙏 لطفاً قوانین گروه را رعایت کنید.",
-            parse_mode="Markdown")
+        _announce(chat_id, "warn", tid, tname,
+                  by_name=sender_name, reason=f"نقض قوانین گروه (اخطار {count})",
+                  count=count,
+                  fallback=(f"⚠️ **{api.esc_md(tname)}** اخطار گرفت ({count}/3)\n\n"
+                            f"🙏 لطفاً قوانین گروه را رعایت کنید."))
 
         try:
             notify.notify_warn(tid, chat_id, count, 3,
@@ -291,9 +326,9 @@ def cmd_unwarn(chat_id, user_id, message):
     if w.get(tid, 0) > 0:
         w[tid] -= 1
         set_("warnings", chat_id, w)
-        api.send(chat_id, f"✅ یک اخطار از {u_name(t)} کم شد. ({w[tid]}/3)")
+        api.send(chat_id, f"✅ یک اخطار از {api.esc_md(u_name(t))} کم شد. ({w[tid]}/3)")
     else:
-        api.send(chat_id, f"ℹ️ {u_name(t)} اخطار فعالی ندارد.")
+        api.send(chat_id, f"ℹ️ {api.esc_md(u_name(t))} اخطار فعالی ندارد.")
 
 
 def cmd_warns(chat_id, user_id, message):
@@ -304,7 +339,7 @@ def cmd_warns(chat_id, user_id, message):
         return
     w = get("warnings", chat_id) or {}
     c = w.get(str(t["id"]), 0)
-    api.send(chat_id, f"📋 تعداد اخطارهای {u_name(t)}: **{c}**",
+    api.send(chat_id, f"📋 تعداد اخطارهای {api.esc_md(u_name(t))}: **{api.esc_md(c)}**",
              parse_mode="Markdown")
 
 
@@ -337,9 +372,10 @@ def cmd_mute(chat_id, user_id, message, args):
     except Exception as e:
         print(f"[mute:notify] {e}")
 
-    api.send(chat_id,
-        f"🔇 **{u_name(t)}** به مدت **{dur_fa}** سکوت شد.",
-        parse_mode="Markdown")
+    _announce(chat_id, "mute", t["id"], u_name(t),
+              by_name=sender_name, reason="نقض قوانین گروه", duration=dur_fa,
+              fallback=(f"🔇 **{api.esc_md(u_name(t))}** به مدت "
+                        f"**{api.esc_md(dur_fa)}** سکوت شد."))
 
 
 def cmd_unmute(chat_id, user_id, message):
@@ -358,8 +394,9 @@ def cmd_unmute(chat_id, user_id, message):
     except Exception:
         pass
 
-    api.send(chat_id, f"🔊 **{u_name(t)}** از سکوت آزاد شد.",
-             parse_mode="Markdown")
+    _announce(chat_id, "unmute", t["id"], u_name(t),
+              by_name=u_name(message["from"]), reason="پایان سکوت",
+              fallback=f"🔊 **{api.esc_md(u_name(t))}** از سکوت آزاد شد.")
 
 
 # ============================================================
@@ -387,8 +424,9 @@ def cmd_ban(chat_id, user_id, message):
     except Exception as e:
         print(f"[ban:notify] {e}")
 
-    api.send(chat_id, f"🚫 **{u_name(t)}** از گروه بن شد.",
-             parse_mode="Markdown")
+    _announce(chat_id, "ban", t["id"], u_name(t),
+              by_name=sender_name, reason="تصمیم ادمین",
+              fallback=f"🚫 **{api.esc_md(u_name(t))}** از گروه بن شد.")
 
 
 def cmd_unban(chat_id, user_id, message):
@@ -407,8 +445,9 @@ def cmd_unban(chat_id, user_id, message):
     except Exception:
         pass
 
-    api.send(chat_id, f"✅ **{u_name(t)}** از بن آزاد شد.",
-             parse_mode="Markdown")
+    _announce(chat_id, "unban", t["id"], u_name(t),
+              by_name=u_name(message["from"]), reason="بخشش توسط ادمین",
+              fallback=f"✅ **{api.esc_md(u_name(t))}** از بن آزاد شد.")
 
 
 def cmd_kick(chat_id, user_id, message):
@@ -433,8 +472,9 @@ def cmd_kick(chat_id, user_id, message):
     except Exception as e:
         print(f"[kick:notify] {e}")
 
-    api.send(chat_id, f"👢 **{u_name(t)}** اخراج شد.",
-             parse_mode="Markdown")
+    _announce(chat_id, "kick", t["id"], u_name(t),
+              by_name=sender_name, reason="تصمیم ادمین",
+              fallback=f"👢 **{api.esc_md(u_name(t))}** اخراج شد.")
 
 
 # ============================================================
@@ -543,7 +583,7 @@ def cmd_promote(chat_id, user_id, message, args=None):
                  reply_to=message["message_id"])
         return
     if is_admin(chat_id, tid):
-        api.send(chat_id, f"ℹ️ {tname} از قبل ادمینه.",
+        api.send(chat_id, f"ℹ️ {api.esc_md(tname)} از قبل ادمینه.",
                  reply_to=message["message_id"])
         return
 
@@ -551,11 +591,11 @@ def cmd_promote(chat_id, user_id, message, args=None):
 
     if ok:
         api.send(chat_id,
-            f"👑 **{tname}** به ادمین ارتقا یافت!\n\n👤 `{tid}`",
+            f"👑 **{api.esc_md(tname)}** به ادمین ارتقا یافت!\n\n👤 `{tid}`",
             parse_mode="Markdown")
     else:
         api.send(chat_id,
-            f"❌ **نتونستم {tname} رو ارتقا بدم.**\n\n"
+            f"❌ **نتونستم {api.esc_md(tname)} رو ارتقا بدم.**\n\n"
             f"💡 بله ممکنه این قابلیت رو پشتیبانی نکنه.",
             parse_mode="Markdown")
 
@@ -577,18 +617,18 @@ def cmd_demote(chat_id, user_id, message):
                  reply_to=message["message_id"])
         return
     if not is_admin(chat_id, tid):
-        api.send(chat_id, f"ℹ️ {tname} ادمین نیست.",
+        api.send(chat_id, f"ℹ️ {api.esc_md(tname)} ادمین نیست.",
                  reply_to=message["message_id"])
         return
 
     ok, r = _demote_admin(chat_id, tid)
 
     if ok:
-        api.send(chat_id, f"⬇️ **{tname}** از ادمینی حذف شد.",
+        api.send(chat_id, f"⬇️ **{api.esc_md(tname)}** از ادمینی حذف شد.",
                  parse_mode="Markdown")
     else:
         api.send(chat_id,
-            f"❌ **نتونستم {tname} رو تنزل بدم.**",
+            f"❌ **نتونستم {api.esc_md(tname)} رو تنزل بدم.**",
             parse_mode="Markdown")
 
 
@@ -686,7 +726,7 @@ def tag_users_smart(chat_id, user_id, user_name, mode="all"):
 
     if not users:
         api.send(chat_id,
-            f"{mode_icon} **{mode_fa}**\n\n"
+            f"{mode_icon} **{api.esc_md(mode_fa)}**\n\n"
             f"❌ **هیچ کاربری پیدا نشد!**",
             parse_mode="Markdown",
             reply_to=0)
@@ -709,11 +749,11 @@ def tag_users_smart(chat_id, user_id, user_name, mode="all"):
     )
     if total_without > 0:
         header += f"⚠️ بدون یوزرنیم: `{total_without}`\n"
-    header += f"👮 توسط: **{user_name}**\n\n"
+    header += f"👮 توسط: **{api.esc_md(user_name)}**\n\n"
 
     # ۷. تگ با @username
     if with_username:
-        mentions = [f"@{u['username']}" for u in with_username]
+        mentions = [f"@{api.esc_md(u['username'])}" for u in with_username]
 
         chunks = []
         current = []
@@ -759,7 +799,7 @@ def tag_users_smart(chat_id, user_id, user_name, mode="all"):
         txt += "_این کاربران قابل تگ شدن نیستن چون یوزرنیم ندارن:_\n\n"
 
         for u in without_username[:30]:
-            txt += f"• {u['name']}\n"
+            txt += f"• {api.esc_md(u['name'])}\n"
 
         if total_without > 30:
             txt += f"\n_و {total_without - 30} نفر دیگر..._\n"
@@ -878,7 +918,7 @@ def cmd_lock_group(chat_id, user_id, user_name):
     lock_mod.lock_group(chat_id, user_id)
     api.send(chat_id,
         "🔒 **گروه قفل شد.**\n\n"
-        f"👮 توسط: **{user_name}**",
+        f"👮 توسط: **{api.esc_md(user_name)}**",
         parse_mode="Markdown")
 
 
@@ -893,8 +933,8 @@ def cmd_unlock_group(chat_id, user_id, user_name):
 
     api.send(chat_id,
         "🔓 **گروه باز شد.**\n\n"
-        f"👮 توسط: **{user_name}**\n"
-        f"🔓 کاربران آزادشده: **{count}** نفر",
+        f"👮 توسط: **{api.esc_md(user_name)}**\n"
+        f"🔓 کاربران آزادشده: **{api.esc_md(count)}** نفر",
         parse_mode="Markdown")
 
 
@@ -905,7 +945,7 @@ def cmd_free_all_locked(chat_id, user_id, user_name):
         api.send(chat_id, "ℹ️ هیچ کاربر قفل‌شده‌ای وجود نداره.")
         return
     lock_mod.clear_lock_list(chat_id)
-    api.send(chat_id, f"🔓 **{count}** کاربر آزاد شدند.",
+    api.send(chat_id, f"🔓 **{api.esc_md(count)}** کاربر آزاد شدند.",
              parse_mode="Markdown")
 
 
@@ -946,7 +986,7 @@ def cmd_addword(chat_id, user_id, args):
         if w not in bw:
             bw.append(w)
     set_("banned_words", chat_id, bw)
-    api.send(chat_id, f"✅ **{len(args)}** کلمه اضافه شد.")
+    api.send(chat_id, f"✅ **{api.esc_md(len(args))}** کلمه اضافه شد.")
 
 
 def cmd_delword(chat_id, user_id, args):

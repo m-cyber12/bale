@@ -412,9 +412,9 @@ def _start_rps(chat_id, p1_id, p2_id, p2_name):
         "╔══════════════════════════╗\n"
         "║    🪨  سـنـگ کـاغـذ قـیـچـی    ║\n"
         "╚══════════════════════════╝\n\n"
-        f"👤 <a href='tg://user?id={p1_id}'>بازیکن ۱</a>  ⚔️  <a href='tg://user?id={p2_id}'>{p2_name}</a>\n\n"
+        f"👤 <a href='tg://user?id={p1_id}'>بازیکن ۱</a>  ⚔️  <a href='tg://user?id={p2_id}'>{api.esc_html(p2_name)}</a>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎯 **هر دو نفر یکی رو انتخاب کنید:**",
+        "🎯 <b>هر دو نفر یکی رو انتخاب کنید:</b>",
         markup=kb(rows), parse_mode="HTML")
 
 
@@ -454,15 +454,15 @@ def _start_todd(chat_id, p1_id, p2_id, p2_name):
         f"╔══════════════════════════╗\n"
         f"║    🎯  جـرئـت  یـا  حـقـیـقـت    ║\n"
         f"╚══════════════════════════╝\n\n"
-        f"👤 <a href='tg://user?id={p1_id}'>بازیکن ۱</a>  ⚔️  <a href='tg://user?id={p2_id}'>{p2_name}</a>\n\n"
+        f"👤 <a href='tg://user?id={p1_id}'>بازیکن ۱</a>  ⚔️  <a href='tg://user?id={p2_id}'>{api.esc_html(p2_name)}</a>\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎲 **راند {game_round_label(1, rounds)}**\n"
-        f"📌 قرعه: **{kind}**\n"
+        f"🎲 <b>راند {game_round_label(1, rounds)}</b>\n"
+        f"📌 قرعه: <b>{api.esc_html(kind)}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"❓ _{q}_\n\n"
+        f"❓ <i>{q}</i>\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💡 _اگه شامل ویس، عکس یا ویدیو هست، بفرستش_\n\n"
-        f"👇 **بعد از انجام، همه اعضا رأی می‌دن:**",
+        f"💡 <i>اگه شامل ویس، عکس یا ویدیو هست، بفرستش</i>\n\n"
+        f"👇 <b>بعد از انجام، همه اعضا رأی می‌دن:</b>",
         markup=kb(rows),
         parse_mode="HTML")
 
@@ -480,10 +480,10 @@ def _start_guess(chat_id, p1_id, p2_id, p2_name):
         "answer": target, "guesses": {}, "ts": time.time(),
     }
     api.send(chat_id,
-        "🎯 **چلنج حدس عدد**\n"
+        "🎯 <b>چلنج حدس عدد</b>\n"
         "━━━━━━━━━━━━━━━\n"
         f"👤 <a href='tg://user?id={p1_id}'>بازیکن ۱</a>\n"
-        f"👤 <a href='tg://user?id={p2_id}'>{p2_name}</a>\n\n"
+        f"👤 <a href='tg://user?id={p2_id}'>{api.esc_html(p2_name)}</a>\n\n"
         "هر دو یه عدد بین ۱ تا ۱۰۰ حدس بزنن!\n"
         "هر کی نزدیک‌تر بود می‌بره.\n\n"
         "👇 عدد رو توی چت بنویسید:",
@@ -497,11 +497,11 @@ def _start_word(chat_id, p1_id, p2_id, p2_name):
         "answer": w, "ts": time.time(),
     }
     api.send(chat_id,
-        "💭 **چلنج حدس کلمه**\n"
+        "💭 <b>چلنج حدس کلمه</b>\n"
         "━━━━━━━━━━━━━━━\n"
         f"👤 <a href='tg://user?id={p1_id}'>بازیکن ۱</a>\n"
-        f"👤 <a href='tg://user?id={p2_id}'>{p2_name}</a>\n\n"
-        f"🔤 تعداد حروف: `{len(w)}`\n"
+        f"👤 <a href='tg://user?id={p2_id}'>{api.esc_html(p2_name)}</a>\n\n"
+        f"🔤 تعداد حروف: <code>{len(w)}</code>\n"
         f"🏁 اولین کسی که درست بگه می‌بره!\n\n"
         "👇 توی چت بنویسید:",
         parse_mode="HTML")
@@ -517,11 +517,11 @@ def _start_scramble(chat_id, p1_id, p2_id, p2_name):
         "answer": w, "ts": time.time(),
     }
     api.send(chat_id,
-        f"🔤 **چلنج حروف بهم ریخته**\n"
+        f"🔤 <b>چلنج حروف بهم ریخته</b>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"👤 <a href='tg://user?id={p1_id}'>بازیکن ۱</a>\n"
-        f"👤 <a href='tg://user?id={p2_id}'>{p2_name}</a>\n\n"
-        f"🔤 `{scrambled}`\n\n"
+        f"👤 <a href='tg://user?id={p2_id}'>{api.esc_html(p2_name)}</a>\n\n"
+        f"🔤 <code>{scrambled}</code>\n\n"
         "🏁 اولین کسی که درست بگه می‌بره!",
         parse_mode="HTML")
 
@@ -538,11 +538,11 @@ def _start_dice(chat_id, p1_id, p2_id, p2_name):
         winner = "🤝 مساوی"
 
     api.send(chat_id,
-        f"🎲 **نبرد تاس**\n"
+        f"🎲 <b>نبرد تاس</b>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"👤 بازیکن ۱: {faces[r1-1]} ({r1})\n"
-        f"👤 {p2_name}: {faces[r2-1]} ({r2})\n\n"
-        f"🏆 برنده: **{winner}**",
+        f"👤 {api.esc_html(p2_name)}: {faces[r2-1]} ({r2})\n\n"
+        f"🏆 برنده: <b>{api.esc_html(winner)}</b>",
         parse_mode="HTML")
 
 
@@ -550,10 +550,10 @@ def _start_coin(chat_id, p1_id, p2_id, p2_name):
     c1 = random.choice(["شیر 🦁", "خط ✏️"])
     c2 = "خط ✏️" if c1.startswith("شیر") else "شیر 🦁"
     api.send(chat_id,
-        f"🪙 **شیر یا خط**\n"
+        f"🪙 <b>شیر یا خط</b>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"👤 بازیکن ۱: {c1}\n"
-        f"👤 {p2_name}: {c2}\n\n"
+        f"👤 {api.esc_html(p2_name)}: {c2}\n\n"
         f"🏆 نتیجه: هر دو برنده!",
         parse_mode="HTML")
 
@@ -595,8 +595,8 @@ def handle_message(chat_id, user_id, text, message):
             else:
                 winner = "🤝 مساوی"
             api.send(chat_id,
-                f"🏆 **نتیجه:**\nعدد درست: `{target}`\n"
-                f"بازیکن ۱: `{g1}` | بازیکن ۲: `{g2}`\n\nبرنده: {winner}",
+                f"🏆 <b>نتیجه:</b>\nعدد درست: <code>{target}</code>\n"
+                f"بازیکن ۱: <code>{g1}</code> | بازیکن ۲: <code>{g2}</code>\n\nبرنده: {winner}",
                 parse_mode="HTML")
             BETWEEN_GAMES.pop(chat_id, None)
             return True
@@ -639,7 +639,7 @@ def rps_choice(chat_id, user_id, choice):
         else:
             result = f"🎉 <a href='tg://user?id={game['p2']}'>بازیکن ۲</a> برد!"
         api.send(chat_id,
-            f"🪨 **نتیجه:**\n"
+            f"🪨 <b>نتیجه:</b>\n"
             f"بازیکن ۱: {RPS_EMOJI[c1]}\n"
             f"بازیکن ۲: {RPS_EMOJI[c2]}\n\n{result}",
             parse_mode="HTML")
@@ -702,7 +702,7 @@ def _ask_grace(chat_id, game):
         f"║    ⏳  فـرصـت ۱۰ ثـانـیـه     ║\n"
         f"╚══════════════════════════╝\n\n"
         f"🙏 **اکثریت رأی دادن که انجام نشده!**\n\n"
-        f"🎯 **{performer_name}** جان، وقت داری **۱۰ ثانیه** انجامش بدی\n"
+        f"🎯 **{api.esc_md(performer_name)}** جان، وقت داری **۱۰ ثانیه** انجامش بدی\n"
         f"وگرنه **۱۵ امتیاز** ازت کم میشه 💔\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👇 **انتخاب کن:**",
@@ -754,13 +754,13 @@ def _finish_todd_round(chat_id, refused=False, refuser_id=None):
     if refused:
         scores[str(performer)] = scores.get(str(performer), 0) - 15
         result = (
-            f"❌ **{performer_name}** انجام نداد!\n"
+            f"❌ **{api.esc_md(performer_name)}** انجام نداد!\n"
             f"💔 **۱۵ امتیاز** کم شد"
         )
     else:
         scores[str(performer)] = scores.get(str(performer), 0) + 15
         result = (
-            f"🎉 **{performer_name}** انجام داد!\n"
+            f"🎉 **{api.esc_md(performer_name)}** انجام داد!\n"
             f"⭐ **۱۵ امتیاز** گرفت"
         )
 
@@ -779,8 +779,8 @@ def _finish_todd_round(chat_id, refused=False, refuser_id=None):
         f"{result}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🏆 **جدول امتیازات:**\n"
-        f"👤 بازیکن ۱ → **{score_p1}**\n"
-        f"👤 {p2_name} → **{score_p2}**\n"
+        f"👤 بازیکن ۱ → **{api.esc_md(score_p1)}**\n"
+        f"👤 {api.esc_md(p2_name)} → **{api.esc_md(score_p2)}**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
     )
 
@@ -788,7 +788,7 @@ def _finish_todd_round(chat_id, refused=False, refuser_id=None):
         if score_p1 > score_p2:
             winner = "🏆 **بازیکن ۱ برنده شد!**"
         elif score_p2 > score_p1:
-            winner = f"🏆 **{p2_name} برنده شد!**"
+            winner = f"🏆 **{api.esc_md(p2_name)} برنده شد!**"
         else:
             winner = "🤝 **مساوی!**"
 
@@ -832,8 +832,8 @@ def _finish_todd_round(chat_id, refused=False, refuser_id=None):
     next_text = result_text + (
         f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎲 **راند {game['round']} از {max_rounds}**\n"
-        f"📌 قرعه: **{next_kind}**\n"
-        f"👤 روی: **{next_performer_name}**\n"
+        f"📌 قرعه: **{api.esc_md(next_kind)}**\n"
+        f"👤 روی: **{api.esc_md(next_performer_name)}**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"❓ _{next_q}_\n\n"
         f"👇 **بعد از انجام، همه اعضا رأی می‌دن:**"
@@ -917,12 +917,12 @@ def _anon_match(game_type, a, b):
                 api.send(u["id"],
                     f"🎉 **حریف پیدا شد!**\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"👤 حریف: **{opp['name']}**\n\n"
+                    f"👤 حریف: **{api.esc_md(opp['name'])}**\n\n"
                     f"╔══════════════════════════╗\n"
                     f"║    🎯  جـرئـت  یـا  حـقـیـقـت    ║\n"
                     f"╚══════════════════════════╝\n\n"
                     f"🎲 **راند {game_round_label(1, rounds)}**\n"
-                    f"📌 قرعه: **{kind}**\n"
+                    f"📌 قرعه: **{api.esc_md(kind)}**\n"
                     f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                     f"❓ _{q}_\n\n"
                     f"💡 _اگه شامل ویس، عکس یا ویدیو هست، بفرستش_\n\n"
@@ -938,7 +938,7 @@ def _anon_match(game_type, a, b):
             try:
                 api.send(u["id"],
                     f"🎮 **حریف پیدا شد!**\n"
-                    f"👤 حریف: **{opp['name']}**\n\n"
+                    f"👤 حریف: **{api.esc_md(opp['name'])}**\n\n"
                     f"یکی رو انتخاب کن:",
                     markup=kb([
                         [btn("🪨 سنگ", f"anon:rps:{pair_id}:rock"),
@@ -959,7 +959,7 @@ def _anon_match(game_type, a, b):
                 api.send(u["id"],
                     f"🎯 **چلنج حدس عدد**\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"👤 حریف: **{opp['name']}**\n\n"
+                    f"👤 حریف: **{api.esc_md(opp['name'])}**\n\n"
                     f"یه عدد بین ۱ تا ۱۰۰ حدس بزن.\n"
                     f"هر کی نزدیک‌تر بود می‌بره!\n\n"
                     f"👇 عدد رو بفرست:",
@@ -977,7 +977,7 @@ def _anon_match(game_type, a, b):
                 api.send(u["id"],
                     f"💭 **چلنج حدس کلمه**\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"👤 حریف: **{opp['name']}**\n"
+                    f"👤 حریف: **{api.esc_md(opp['name'])}**\n"
                     f"🔤 تعداد حروف: `{len(w)}`\n\n"
                     f"🏁 اولین کسی که درست بگه می‌بره!\n\n"
                     f"👇 کلمه رو بفرست:",
@@ -998,7 +998,7 @@ def _anon_match(game_type, a, b):
                 api.send(u["id"],
                     f"🔤 **چلنج حروف بهم ریخته**\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"👤 حریف: **{opp['name']}**\n"
+                    f"👤 حریف: **{api.esc_md(opp['name'])}**\n"
                     f"🔤 `{scrambled}`\n\n"
                     f"🏁 اولین کسی که درست بگه می‌بره!",
                     parse_mode="Markdown")
@@ -1013,7 +1013,7 @@ def _anon_match(game_type, a, b):
                 api.send(u["id"],
                     f"🎲 **نبرد تاس**\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"👤 حریف: **{opp['name']}**\n\n"
+                    f"👤 حریف: **{api.esc_md(opp['name'])}**\n\n"
                     f"🎲 تاس بریز:",
                     markup=kb([[btn("🎲 بریز!", f"anon:dice:{pair_id}:roll")]]),
                     parse_mode="Markdown")
@@ -1028,7 +1028,7 @@ def _anon_match(game_type, a, b):
                 api.send(u["id"],
                     f"🪙 **شیر یا خط**\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"👤 حریف: **{opp['name']}**\n\n"
+                    f"👤 حریف: **{api.esc_md(opp['name'])}**\n\n"
                     f"انتخاب کن:",
                     markup=kb([
                         [btn("🦁 شیر", f"anon:coin:{pair_id}:lion"),
@@ -1084,10 +1084,10 @@ def _resolve_anon(game, pair_id):
              (m1 == "paper" and m2 == "rock") or \
              (m1 == "scissor" and m2 == "paper"):
             winner_id = p1
-            result_text = f"🪨 {n1}: {RPS_EMOJI[m1]}\n📄 {n2}: {RPS_EMOJI[m2]}\n\n🎉 **{n1}** برنده شد!"
+            result_text = f"🪨 {n1}: {RPS_EMOJI[m1]}\n📄 {n2}: {RPS_EMOJI[m2]}\n\n🎉 **{api.esc_md(n1)}** برنده شد!"
         else:
             winner_id = p2
-            result_text = f"🪨 {n1}: {RPS_EMOJI[m1]}\n📄 {n2}: {RPS_EMOJI[m2]}\n\n🎉 **{n2}** برنده شد!"
+            result_text = f"🪨 {n1}: {RPS_EMOJI[m1]}\n📄 {n2}: {RPS_EMOJI[m2]}\n\n🎉 **{api.esc_md(n2)}** برنده شد!"
 
     elif gtype == "guess":
         target = game["answer"]
@@ -1095,10 +1095,10 @@ def _resolve_anon(game, pair_id):
         result_text = f"🎯 عدد درست: `{target}`\n{n1}: `{m1}` | {n2}: `{m2}`\n\n"
         if d1 < d2:
             winner_id = p1
-            result_text += f"🎉 **{n1}** نزدیک‌تر بود!"
+            result_text += f"🎉 **{api.esc_md(n1)}** نزدیک‌تر بود!"
         elif d2 < d1:
             winner_id = p2
-            result_text += f"🎉 **{n2}** نزدیک‌تر بود!"
+            result_text += f"🎉 **{api.esc_md(n2)}** نزدیک‌تر بود!"
         else:
             result_text += "🤝 مساوی!"
 
@@ -1106,17 +1106,17 @@ def _resolve_anon(game, pair_id):
         first_str = list(game["moves"].keys())[0]
         winner_id = int(first_str)
         wname = game["names"][first_str]
-        result_text = f"🎉 **{wname}** زودتر جواب داد!\n✅ کلمه: `{game['answer']}`"
+        result_text = f"🎉 **{api.esc_md(wname)}** زودتر جواب داد!\n✅ کلمه: `{game['answer']}`"
 
     elif gtype == "dice":
         faces = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"]
         result_text = f"🎲 {n1}: {faces[m1-1]} ({m1})\n🎲 {n2}: {faces[m2-1]} ({m2})\n\n"
         if m1 > m2:
             winner_id = p1
-            result_text += f"🎉 **{n1}** برنده شد!"
+            result_text += f"🎉 **{api.esc_md(n1)}** برنده شد!"
         elif m2 > m1:
             winner_id = p2
-            result_text += f"🎉 **{n2}** برنده شد!"
+            result_text += f"🎉 **{api.esc_md(n2)}** برنده شد!"
         else:
             result_text += "🤝 مساوی!"
 
@@ -1131,7 +1131,7 @@ def _resolve_anon(game, pair_id):
         if len(winners) == 2:
             result_text += "🎉 هر دو برنده!"
         elif len(winners) == 1:
-            result_text += f"🎉 **{winners[0]}** برنده!"
+            result_text += f"🎉 **{api.esc_md(winners[0])}** برنده!"
         else:
             result_text += "😐 هیچ‌کس برنده نشد!"
 
@@ -1226,10 +1226,10 @@ def _finish_anon_todd(pair_id, refused=False):
 
     if refused:
         scores[str(performer)] = scores.get(str(performer), 0) - 15
-        result = f"❌ **{performer_name}** انجام نداد! 💔 ۱۵ امتیاز کم شد"
+        result = f"❌ **{api.esc_md(performer_name)}** انجام نداد! 💔 ۱۵ امتیاز کم شد"
     else:
         scores[str(performer)] = scores.get(str(performer), 0) + 15
-        result = f"🎉 **{performer_name}** انجام داد! ⭐ ۱۵ امتیاز گرفت"
+        result = f"🎉 **{api.esc_md(performer_name)}** انجام داد! ⭐ ۱۵ امتیاز گرفت"
 
     game["scores"] = scores
     s1 = scores.get(str(p1), 0)
@@ -1243,8 +1243,8 @@ def _finish_anon_todd(pair_id, refused=False):
         f"{result}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🏆 **جدول امتیازات:**\n"
-        f"👤 {n1} → **{s1}**\n"
-        f"👤 {n2} → **{s2}**\n"
+        f"👤 {n1} → **{api.esc_md(s1)}**\n"
+        f"👤 {n2} → **{api.esc_md(s2)}**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
     )
 
@@ -1276,8 +1276,8 @@ def _finish_anon_todd(pair_id, refused=False):
         result_text += (
             f"\n\n━━━━━━━━━━━━━━━━━━━━━━\n"
             f"🎲 **راند {game['round']} از {max_rounds}**\n"
-            f"📌 قرعه: **{next_kind}**\n"
-            f"👤 روی: **{next_performer_name}**\n"
+            f"📌 قرعه: **{api.esc_md(next_kind)}**\n"
+            f"👤 روی: **{api.esc_md(next_performer_name)}**\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"❓ _{next_q}_\n\n"
             f"💡 _اگه شامل ویس، عکس یا ویدیو هست، بفرستش_"

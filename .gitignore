@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# دیتای ربات (نباید کامیت شود)
+data/
+
+# گزارش اجرای تست‌ها
+tests/last_run.json

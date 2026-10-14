@@ -190,9 +190,9 @@ def start_with_bot(chat_id, user_id, user_name):
     r = _safe_send(chat_id,
         "🎮 **بازی دوز**\n"
         "━━━━━━━━━━━━━━━\n\n"
-        f"👤 {user_name}: ❌\n"
+        f"👤 {api.esc_md(user_name)}: ❌\n"
         f"🤖 ربات: ⭕\n\n"
-        f"🎯 نوبت **{user_name}**\n"
+        f"🎯 نوبت **{api.esc_md(user_name)}**\n"
         f"روی یه خونه بزن:",
         reply_to=0,
         parse_mode="Markdown",
@@ -233,9 +233,9 @@ def start_with_friend(chat_id, p1_id, p1_name, p2_id, p2_name):
     r = _safe_send(chat_id,
         "🎮 **بازی دوز**\n"
         "━━━━━━━━━━━━━━━\n\n"
-        f"👤 {p1_name}: ❌\n"
-        f"👤 {p2_name}: ⭕\n\n"
-        f"🎯 نوبت **{p1_name}**",
+        f"👤 {api.esc_md(p1_name)}: ❌\n"
+        f"👤 {api.esc_md(p2_name)}: ⭕\n\n"
+        f"🎯 نوبت **{api.esc_md(p1_name)}**",
         reply_to=0,
         parse_mode="Markdown",
         markup=kb(rows))
@@ -314,9 +314,9 @@ def _anon_doss_match(a, b):
             api.send(u["id"],
                 "🎮 **دوز ناشناس**\n"
                 "━━━━━━━━━━━━━━━\n\n"
-                f"👤 تو: **{u['name']}** {sym}\n"
-                f"🎭 حریف: **{opp_name}**\n\n"
-                f"🎯 نوبت **{u['name']}**\n"
+                f"👤 تو: **{api.esc_md(u['name'])}** {sym}\n"
+                f"🎭 حریف: **{api.esc_md(opp_name)}**\n\n"
+                f"🎯 نوبت **{api.esc_md(u['name'])}**\n"
                 f"_وقتی نوبتت شد، دکمه‌ها فعال می‌شن_",
                 reply_to=0,
                 markup=kb(rows),
@@ -395,9 +395,9 @@ def _refresh_board(chat_id, game, panel_msg_id=None):
     text = (
         f"🎮 **بازی دوز**\n"
         f"━━━━━━━━━━━━━━━\n\n"
-        f"👤 {game['p1_name']}: {p1_sym}\n"
-        f"👤 {game['p2_name']}: {p2_sym}\n\n"
-        f"🎯 نوبت **{turn_name}**"
+        f"👤 {api.esc_md(game['p1_name'])}: {p1_sym}\n"
+        f"👤 {api.esc_md(game['p2_name'])}: {p2_sym}\n\n"
+        f"🎯 نوبت **{api.esc_md(turn_name)}**"
     )
 
     if panel_msg_id:
@@ -568,7 +568,7 @@ def _finish_anon(pair_id, game, winner_sym):
                 winner_id = uid
                 break
         wname = game["p1_name"] if winner_id == game["p1"] else game["p2_name"]
-        result = f"🎉 **{wname} برنده شد!**"
+        result = f"🎉 **{api.esc_md(wname)} برنده شد!**"
 
     text = (
         f"🏁 **پایان بازی دوز**\n"

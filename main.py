@@ -23,6 +23,10 @@ import doss
 import gifmaker
 import asl_laqab
 import notify
+import ai
+import ai_persona
+import ai_panel
+import config
 from config import OWNER_ID
 
 
@@ -218,6 +222,10 @@ ALIASES = {
     "tag": "تگ", "تگ": "تگ", "منشن": "تگ", "mention": "تگ",
     "تگهمه": "تگ", "تگکردن": "تگ",
     "tagall": "تگ", "tag_all": "تگ",
+    "ai": "هوش‌مصنوعی", "هوش": "هوش‌مصنوعی", "هوش‌مصنوعی": "هوش‌مصنوعی",
+    "دستیار": "هوش‌مصنوعی", "دستیارai": "هوش‌مصنوعی",
+    "aikey": "کلیدai", "کلیدai": "کلیدai",
+    "openrouter": "کلیدai", "کلید ai": "کلیدai",
 }
 
 NO_SLASH_CMDS = set(ALIASES.values())
@@ -515,13 +523,13 @@ def _handle_todd_callback(cb, cb_id, data, chat_id, msg_id, user):
         if mode == "bot":
             if kind == "truth":
                 api.send(chat_id,
-                    f"🎯 حقیقت برای {first_name}\n\n"
+                    f"🎯 حقیقت برای {api.esc_md(first_name)}\n\n"
                     f"❓ {q}\n\n"
                     f"باید جواب بدی 💬",
                     parse_mode="Markdown")
             else:
                 api.send(chat_id,
-                    f"🔥 جرئت برای {first_name}\n\n"
+                    f"🔥 جرئت برای {api.esc_md(first_name)}\n\n"
                     f"⚡ {q}\n\n"
                     f"باید انجامش بدی 💪",
                     parse_mode="Markdown")
@@ -541,7 +549,7 @@ def _handle_todd_callback(cb, cb_id, data, chat_id, msg_id, user):
             except Exception:
                 pass
             api.send(chat_id,
-                f"🎯 حقیقت برای <a href='tg://user?id={target_id}'>{target_name}</a>\n\n"
+                f"🎯 حقیقت برای <a href='tg://user?id={target_id}'>{api.esc_html(target_name)}</a>\n\n"
                 f"❓ {q}\n\n"
                 f"باید جواب بدی 💬",
                 parse_mode="HTML")
@@ -553,7 +561,7 @@ def _handle_todd_callback(cb, cb_id, data, chat_id, msg_id, user):
             except Exception:
                 pass
             api.send(chat_id,
-                f"🔥 جرئت برای <a href='tg://user?id={target_id}'>{target_name}</a>\n\n"
+                f"🔥 جرئت برای <a href='tg://user?id={target_id}'>{api.esc_html(target_name)}</a>\n\n"
                 f"⚡ {d}\n\n"
                 f"باید انجامش بدی 💪",
                 parse_mode="HTML")
@@ -634,16 +642,24 @@ def handle(update):
         try:
             cb = update["callback_query"]
             data = cb.get("data", "")
-            msg = cb.get("message", {})
-            chat_id = msg["chat"]["id"]
+            msg = cb.get("message", {}) or {}
+            chat_id = (msg.get("chat") or {}).get("id")
             msg_id = msg.get("message_id")
-            user_id = cb["from"]["id"]
+            user_id = (cb.get("from") or {}).get("id")
+            if not chat_id or not user_id:
+                print("[callback] skip: chat_id/user_id ندارد")
+                return
 
             reply_msg = msg.get("reply_to_message")
             if reply_msg:
                 api.set_reply_context(reply_msg.get("message_id"))
             else:
                 api.clear_reply_context()
+
+            if data.startswith("ai:"):
+                ai_panel.handle_callback(cb, cb["id"], data, chat_id, msg_id,
+                                         user)
+                return
 
             if data.startswith("cp:"):
                 val = data[3:]
@@ -797,13 +813,18 @@ def handle(update):
         return
 
     chat_id = chat["id"]
-    chat_type = chat["type"]
+    chat_type = chat.get("type", "private")
     user = m["from"]
-    user_id = user["id"]
+    user_id = user.get("id")
+    if not user_id:
+        return
     user_name = admin.u_name(user)
     raw_text = (m.get("text") or "").strip()
     text = normalize(raw_text)
-    msg_id = m["message_id"]
+    msg_id = m.get("message_id")
+    if msg_id is None:
+        print("[handle] skip: message_id ندارد")
+        return
 
     api.set_reply_context(msg_id)
 
@@ -863,13 +884,22 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                 api.send(chat_id, "✅ لغو شد.", parse_mode="Markdown", reply_to=0)
             return
 
+        # 🔑 انتظار کلید OpenRouter
+        if g_settings.get("wait_ai_key") == user_id:
+            if ai_panel.handle_wait_key(chat_id, user_id, raw_text):
+                try:
+                    api.delete(chat_id, msg_id)
+                except Exception as e:
+                    print(f"[ai:del-key-msg] {e}")
+                return
+
         if g_settings.get("wait_bug_reply") == user_id:
             target_id = g_settings.get("bug_reply_target", 0)
             g_settings.pop("wait_bug_reply", None)
             g_settings.pop("bug_reply_target", None)
             storage.set_("settings", "global", g_settings)
             try:
-                api.send(int(target_id), f"📩 پاسخ مدیریت:\n\n{raw_text}", parse_mode="Markdown")
+                api.send(int(target_id), f"📩 پاسخ مدیریت:\n\n{api.esc_md(raw_text)}", parse_mode="Markdown")
                 api.send(chat_id, "✅ ارسال شد.", reply_to=0)
             except Exception as e:
                 api.send(chat_id, f"❌ خطا: {e}", reply_to=0)
@@ -956,7 +986,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                 target_uid = int(cargs[0])
                 reply_text = " ".join(cargs[1:])
                 api.send(target_uid,
-                    f"📩 پاسخ مدیریت:\n\n{reply_text}",
+                    f"📩 پاسخ مدیریت:\n\n{api.esc_md(reply_text)}",
                     parse_mode="Markdown", reply_to=0)
                 api.send(chat_id, "✅ ارسال شد.", reply_to=0)
             except Exception as e:
@@ -1137,7 +1167,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                     try:
                         api.edit_message(chat_id, pmsg,
                             f"📌 افزودن یادداشت (مرحله ۲/۲)\n\n"
-                            f"اسم: {name}\n\n"
+                            f"اسم: {api.esc_md(name)}\n\n"
                             f"حالا متن یادداشت رو بفرست.",
                             parse_mode="Markdown",
                             markup={"inline_keyboard": [[{"text": "❌ لغو", "callback_data": "note:cancel"}]]})
@@ -1182,7 +1212,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                 if prompt_msg_id:
                     try:
                         api.edit_message(chat_id, prompt_msg_id,
-                            f"✅ یادداشت «{name}» ذخیره شد.",
+                            f"✅ یادداشت «{api.esc_md(name)}» ذخیره شد.",
                             markup={"inline_keyboard": [[
                                 {"text": "🔙 بازگشت به پنل", "callback_data": prompt_back}
                             ]]},
@@ -1192,7 +1222,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                 else:
                     try:
                         api.send_autodelete(chat_id,
-                            f"✅ یادداشت {name} ذخیره شد.",
+                            f"✅ یادداشت {api.esc_md(name)} ذخیره شد.",
                             sec=3, parse_mode="Markdown")
                     except Exception:
                         pass
@@ -1518,7 +1548,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
             if prompt_msg_id:
                 try:
                     api.edit_message(chat_id, prompt_msg_id,
-                        f"🏷 لقب ثبت شد: {raw_text}",
+                        f"🏷 لقب ثبت شد: {api.esc_md(raw_text)}",
                         markup={"inline_keyboard": [[
                             {"text": "🔙 بازگشت به پنل", "callback_data": prompt_back}
                         ]]},
@@ -1739,7 +1769,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
             if prompt_msg_id:
                 try:
                     api.edit_message(chat_id, prompt_msg_id,
-                        f"✅ اسم: {name}\n\nحالا متن پاسخ رو بفرست.",
+                        f"✅ اسم: {api.esc_md(name)}\n\nحالا متن پاسخ رو بفرست.",
                         markup={"inline_keyboard": [[
                             {"text": "🔙 بازگشت به پنل", "callback_data": "panel:custom_cmds"}
                         ]]},
@@ -1765,7 +1795,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
             if prompt_msg_id:
                 try:
                     api.edit_message(chat_id, prompt_msg_id,
-                        f"✅ دستور /{name} ثبت شد.",
+                        f"✅ دستور /{api.esc_md(name)} ثبت شد.",
                         markup={"inline_keyboard": [[
                             {"text": "🔙 بازگشت به پنل", "callback_data": prompt_back}
                         ]]},
@@ -1814,7 +1844,9 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                 except Exception as e:
                     print(f"[members_seen:new] {e}")
 
-                msg_id_w = features.send_welcome(chat_id, admin.u_name(member), chat.get("title", ""))
+                msg_id_w = features.send_welcome(chat_id, admin.u_name(member),
+                                                 chat.get("title", ""),
+                                                 member_id=member.get("id"))
                 cfg = storage.get("welcome", chat_id) or {}
                 ad = cfg.get("autodelete", 0)
                 if msg_id_w and ad > 0:
@@ -1884,7 +1916,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
             try:
                 api.send_autodelete(
                     chat_id,
-                    f"گروه قفل است.\n{user_name} جان، فقط ادمین‌ها پیام می‌دن.",
+                    f"گروه قفل است.\n{api.esc_md(user_name)} جان، فقط ادمین‌ها پیام می‌دن.",
                     sec=5, parse_mode="Markdown")
             except Exception as e:
                 print(f"[lock:warn_grp] {e}")
@@ -1903,6 +1935,11 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                         chat_id, user_id, blocked
                     )
                     fa = locks.LOCKS.get(blocked, {}).get("fa", blocked)
+                    try:
+                        ai_persona.note_violation(chat_id, user_id, "lock",
+                                                  user_name)
+                    except Exception as e:
+                        print(f"[persona:lock] {e}")
 
                     if should_kick:
                         try:
@@ -1919,7 +1956,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                         try:
                             api.send_autodelete(
                                 chat_id,
-                                f"👢 {user_name} به دلیل {threshold} بار نقض قوانین ({fa}) اخراج شد.",
+                                f"👢 {api.esc_md(user_name)} به دلیل {threshold} بار نقض قوانین ({fa}) اخراج شد.",
                                 sec=5, parse_mode="Markdown")
                         except Exception as e:
                             print(f"[lock:kick_msg] {e}")
@@ -1934,7 +1971,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                             api.send_autodelete(
                                 chat_id,
                                 f"«{fa}» قفل است.\n"
-                                f"{user_name} جان، این پیام ممنوعه.\n"
+                                f"{api.esc_md(user_name)} جان، این پیام ممنوعه.\n"
                                 f"هشدار: {count}/{threshold}",
                                 sec=5, parse_mode="Markdown")
                         except Exception as e:
@@ -2012,7 +2049,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                         api.send_autodelete(
                             chat_id,
                             f"🌙 حالت شب فعاله\n\n"
-                            f"{user_name} جان، از {cfg.get('start','23:00')} "
+                            f"{api.esc_md(user_name)} جان، از {cfg.get('start','23:00')} "
                             f"تا {cfg.get('end','07:00')} نمی‌تونیم پیام بذاریم.",
                             sec=6, parse_mode="Markdown")
                 except Exception as e:
@@ -2039,7 +2076,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                         api.send_autodelete(
                             chat_id,
                             f"😴 حالت خواب فعاله\n\n"
-                            f"{user_name} جان، الان گروه خوابه.",
+                            f"{api.esc_md(user_name)} جان، الان گروه خوابه.",
                             sec=6, parse_mode="Markdown")
                 except Exception as e:
                     print(f"[sleep:warn] {e}")
@@ -2093,7 +2130,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                     api.send_autodelete(
                         chat_id,
                         f"⏱ حالت آهسته فعاله\n\n"
-                        f"{user_name} جان، {total_sec} ثانیه صبر کن.\n"
+                        f"{api.esc_md(user_name)} جان، {total_sec} ثانیه صبر کن.\n"
                         f"باقی‌مونده: {wait_sec} ثانیه",
                         sec=5, parse_mode="Markdown")
                 except Exception as e:
@@ -2225,10 +2262,28 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                     cur = warns.get(str(user_id), 0) + 1
                     warns[str(user_id)] = cur
                     storage.set_("warnings", chat_id, warns)
+                    try:
+                        ai_persona.note_violation(chat_id, user_id, "badword",
+                                                  user_name)
+                    except Exception as e:
+                        print(f"[persona:badword] {e}")
                     if cur >= max_warns:
-                        api.send(chat_id,
-                            f"{user_name} به دلیل فحش مکرر بن شد.",
-                            parse_mode="Markdown", reply_to=0)
+                        _fb_bad = (f"🚫 {api.esc_md(user_name)} به دلیل فحش "
+                                   f"مکرر بن شد.")
+                        try:
+                            if ai_panel.feature_on(chat_id, "announce"):
+                                ai_persona.announce_punish(
+                                    chat_id, "ban", user_id, user_name,
+                                    by_name="سیستم ضدفحش", reason="فحش مکرر",
+                                    chat_title=chat.get("title", ""),
+                                    count=max_warns)
+                            else:
+                                api.send(chat_id, _fb_bad,
+                                         parse_mode="Markdown", reply_to=0)
+                        except Exception as e:
+                            print(f"[persona:announce-ban] {e}")
+                            api.send(chat_id, _fb_bad,
+                                     parse_mode="Markdown", reply_to=0)
                         try:
                             from storage import save_banned
                             api.ban(chat_id, user_id)
@@ -2245,7 +2300,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                             print(f"[badword:notify] {e}")
                     else:
                         api.send_autodelete(chat_id,
-                            f"⚠️ {user_name} فحش نده. ({cur}/{max_warns})",
+                            f"⚠️ {api.esc_md(user_name)} فحش نده. ({cur}/{max_warns})",
                             sec=5, parse_mode="Markdown")
                     return
             except Exception as e:
@@ -2289,6 +2344,11 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                 uid = str(user_id)
                 bw_warns[uid] = bw_warns.get(uid, 0) + 1
                 count = bw_warns[uid]
+                try:
+                    ai_persona.note_violation(chat_id, user_id, "banned_word",
+                                              user_name)
+                except Exception as e:
+                    print(f"[persona:bw] {e}")
 
                 if count >= bw_threshold:
                     bw_warns[uid] = 0
@@ -2314,7 +2374,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                             print(f"[bw:kick:save] {e}")
                         api.send_autodelete(
                             chat_id,
-                            f"👢 {user_name} به دلیل {bw_threshold} بار کلمات ممنوعه اخراج شد.",
+                            f"👢 {api.esc_md(user_name)} به دلیل {bw_threshold} بار کلمات ممنوعه اخراج شد.",
                             sec=6, parse_mode="Markdown")
                         try:
                             notify.notify_punishment(user_id, chat_id, "kick",
@@ -2333,7 +2393,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                             print(f"[bw:ban:save] {e}")
                         api.send_autodelete(
                             chat_id,
-                            f"🚫 {user_name} به دلیل {bw_threshold} بار کلمات ممنوعه بن شد.",
+                            f"🚫 {api.esc_md(user_name)} به دلیل {bw_threshold} بار کلمات ممنوعه بن شد.",
                             sec=6, parse_mode="Markdown")
                         try:
                             notify.notify_punishment(user_id, chat_id, "ban",
@@ -2354,7 +2414,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                         storage.set_("muted", chat_id, muted)
                         api.send_autodelete(
                             chat_id,
-                            f"🔇 {user_name} به دلیل {bw_threshold} بار کلمات ممنوعه یک ساعت سکوت شد.",
+                            f"🔇 {api.esc_md(user_name)} به دلیل {bw_threshold} بار کلمات ممنوعه یک ساعت سکوت شد.",
                             sec=6, parse_mode="Markdown")
                         try:
                             notify.notify_punishment(user_id, chat_id, "mute",
@@ -2376,7 +2436,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                         storage.set_("muted", chat_id, muted)
                         api.send_autodelete(
                             chat_id,
-                            f"🔇 {user_name} به دلیل {bw_threshold} بار کلمات ممنوعه ۱۰ دقیقه سکوت شد.",
+                            f"🔇 {api.esc_md(user_name)} به دلیل {bw_threshold} بار کلمات ممنوعه ۱۰ دقیقه سکوت شد.",
                             sec=6, parse_mode="Markdown")
                         try:
                             notify.notify_punishment(user_id, chat_id, "mute",
@@ -2389,7 +2449,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                     api.send_autodelete(
                         chat_id,
                         f"🚫 کلمه ممنوعه!\n"
-                        f"{user_name} جان، این کلمه در گروه ممنوعه.\n"
+                        f"{api.esc_md(user_name)} جان، این کلمه در گروه ممنوعه.\n"
                         f"هشدار: {count}/{bw_threshold}",
                         sec=5, parse_mode="Markdown")
                 return
@@ -2397,16 +2457,58 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
     try:
         leveled = xp.add_xp(chat_id, user_id, user_name)
         if leveled:
-            api.send(chat_id, f"🎉 تبریک {user_name}!\nسطح {leveled}",
+            api.send(chat_id, f"🎉 تبریک {api.esc_md(user_name)}!\nسطح {leveled}",
                      parse_mode="Markdown", reply_to=0)
     except Exception as e:
         print(f"[xp] {e}")
+
+    # 🧠 ثبت فعالیت در پرونده‌ی شخصیت (تاریخ عضویت/درجه/لحن)
+    try:
+        ai_persona.note_message(chat_id, user_id, user_name)
+    except Exception as e:
+        print(f"[persona:msg] {e}")
 
     if not cmd:
         return
 
     if cmd == "/راهنما":
         api.send(chat_id, HELP, parse_mode="Markdown")
+        return
+
+    # ============================================
+    # 🧠 هوش مصنوعی — دستیار مدیریت گروه
+    # ============================================
+    if cmd == "/هوش‌مصنوعی":
+        if not is_user_admin:
+            api.send(chat_id, "🧠 این بخش فقط برای ادمین‌های گروهه.", reply_to=0)
+            return
+        ai_panel.cmd_ai_command(chat_id, user_id, user_name, m, args,
+                                chat.get("title", ""))
+        return
+
+    if cmd == "/کلیدai":
+        if user_id != OWNER_ID:
+            api.send(chat_id, "👑 فقط مالک ربات.", reply_to=0)
+            return
+        if not args or not args[0].startswith("sk-"):
+            api.send(chat_id,
+                     "🔑 فرمت درست: `/کلیدai sk-or-v1-...`\n\n"
+                     "کلید را از openrouter.ai/keys بگیر.\n"
+                     "می‌تونی از پنل هم بفرستی: `هوش مصنوعی` → 🔑",
+                     parse_mode="Markdown", reply_to=0)
+            return
+        key = args[0]
+        ai.set_api_key(key)
+        ai.reset_runtime()
+        st = ai.status()
+        try:
+            api.delete(chat_id, msg_id)
+        except Exception:
+            pass
+        api.send(chat_id,
+                 f"✅ کلید ذخیره شد.\n🧠 مدل‌های رایگان: `{st['models_total']}`\n"
+                 f"برای تست بزن: `/هوش‌مصنوعی تست`",
+                 parse_mode="Markdown", reply_to=0)
         return
 
     if cmd == "/اصل":
@@ -2455,7 +2557,8 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
             uname = info.get("username", "")
             fname = info.get("first_name", "کاربر")
             if uname:
-                txt += f"• {fname} — @{uname}\n"
+                txt += (f"• {api.esc_md(fname)} — "
+                        f"@{api.esc_md(uname)}\n")
                 count += 1
                 if count >= 30:
                     txt += f"\nو {len(profiles) - 30} نفر دیگه...\n"
@@ -2726,7 +2829,9 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
 
     if cmd == "/قوانین":
         r = storage.get("rules", chat_id) or {}
-        api.send(chat_id, f"📜 قوانین:\n\n{r.get('text') or 'تنظیم نشده'}", parse_mode="Markdown")
+        api.send(chat_id,
+                 f"📜 قوانین:\n\n{api.esc_md(r.get('text') or 'تنظیم نشده')}",
+                 parse_mode="Markdown")
         return
 
     if cmd == "/یادداشتها":
@@ -2844,7 +2949,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
         for i, (uid, cnt) in enumerate(items, 1):
             medals = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
             display_name = xp_data.get(uid, {}).get("name", "") or f"کاربر {str(uid)[-4:]}"
-            txt += f"{medals} {display_name} — {cnt} پیام\n"
+            txt += f"{medals} {api.esc_md(display_name)} — {cnt} پیام\n"
         api.send(chat_id, txt, parse_mode="Markdown")
         return
 
@@ -3205,7 +3310,7 @@ def send_broadcast_forward(chat_id, user_id, from_chat_id, message_id, target):
     if errors:
         result_txt += "\n\n🔍 نمونه خطاها:\n"
         for e in errors[:5]:
-            result_txt += f"• {e}\n"
+            result_txt += f"• {api.esc_md(str(e))}\n"
 
     api.send(chat_id, result_txt, parse_mode="Markdown")
 
@@ -3214,6 +3319,16 @@ def main():
     print("=" * 50)
     print("🏆 مدیریت گروه آلفا روشن شد!")
     print("=" * 50)
+
+    if not config.has_token():
+        print(config.token_hint())
+        return
+    if ai.enabled():
+        if ai.api_key():
+            print("🧠 موتور هوش مصنوعی: روشن (OpenRouter)")
+        else:
+            print("🧠 هوش مصنوعی روشن است ولی کلید OpenRouter تنظیم نشده.")
+            print("   برای تنظیم: پیوی ربات → پنل → 🧠 هوش مصنوعی → 🔑")
 
     storage.load()
     bid = api.me()

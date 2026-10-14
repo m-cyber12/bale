@@ -9,6 +9,13 @@ import api
 import storage
 from storage import get, set_, update
 
+# 🧠 هوش مصنوعی (اختیاری)
+try:
+    import ai_persona
+except Exception as _e:      # pragma: no cover
+    ai_persona = None
+    print(f"[features] ai_persona لود نشد: {_e}")
+
 try:
     import questions
     QUIZ_QUESTIONS = questions.QUIZ_QUESTIONS
@@ -284,36 +291,79 @@ def set_welcome_autodelete(chat_id, seconds):
     set_("welcome", chat_id, cfg)
 
 
-def send_welcome(chat_id, member_name, group_name):
+def _welcome_autodelete(chat_id, msg_id, seconds):
+    if not (msg_id and seconds and seconds > 0):
+        return
+    def _del():
+        time.sleep(seconds)
+        try:
+            api.delete(chat_id, msg_id)
+        except Exception:
+            pass
+    threading.Thread(target=_del, daemon=True).start()
+
+
+def send_welcome(chat_id, member_name, group_name, member_id=None):
+    """پیام خوش‌آمدگویی.
+
+    اگر متن دلخواه ادمین تنظیم نشده باشد و AI روشن باشد، متن با AI
+    ساخته می‌شود (غیرهمزمان). در آن حالت `None` برمی‌گردد چون هنوز
+    شناسه‌ی پیام معلوم نیست؛ حذف خودکار داخل خودش انجام می‌شود.
+    """
     cfg = storage.get("welcome", chat_id) or {}
     if not cfg.get("enabled"):
         return None
-    text = cfg.get("text") or "🎉 {name} عزیز، به {group} خوش آمدی!"
+
+    custom_text = (cfg.get("text") or "").strip()
+    text = custom_text or "🎉 {name} عزیز، به {group} خوش آمدی!"
     text = text.replace("{name}", member_name).replace("{group}", group_name)
     text = text.replace("{bot}", BOT_NAME)
 
     media_type = cfg.get("media_type")
     file_id = cfg.get("media_file_id")
+    autodelete = int(cfg.get("autodelete", 0) or 0)
 
-    if media_type and file_id:
-        d = {"chat_id": chat_id, "caption": text}
-        if media_type == "photo":
-            d["photo"] = file_id
-            r = api.request("sendPhoto", d)
-        elif media_type == "video":
-            d["video"] = file_id
-            r = api.request("sendVideo", d)
-        elif media_type == "animation":
-            d["animation"] = file_id
-            r = api.request("sendAnimation", d)
+    def _send(body):
+        if media_type and file_id:
+            d = {"chat_id": chat_id, "caption": body}
+            if media_type == "photo":
+                d["photo"] = file_id
+                r = api.request("sendPhoto", d)
+            elif media_type == "video":
+                d["video"] = file_id
+                r = api.request("sendVideo", d)
+            elif media_type == "animation":
+                d["animation"] = file_id
+                r = api.request("sendAnimation", d)
+            else:
+                r = api.send(chat_id, body)
         else:
-            r = api.send(chat_id, text)
-    else:
-        r = api.send(chat_id, text)
+            r = api.send(chat_id, body)
+        if r and r.get("ok"):
+            return r["result"]["message_id"]
+        return None
 
-    if r and r.get("ok"):
-        return r["result"]["message_id"]
-    return None
+    # ---- مسیر AI (فقط وقتی ادمین متن دلخواه نگذاشته) ----
+    if ai_persona and member_id is not None and not custom_text:
+        ai_on = True
+        try:
+            import ai_panel
+            ai_on = ai_panel.feature_on(chat_id, "welcome")
+        except Exception:
+            pass
+        if ai_on:
+            import ai
+            if ai.ready():
+                def _deliver(body, model):
+                    mid = _send(body or text)
+                    _welcome_autodelete(chat_id, mid, autodelete)
+                ai_persona.announce_welcome(
+                    chat_id, member_id, member_name, group_name,
+                    fallback_text=text, on_done=_deliver)
+                return None       # پیام در نخ جداگانه فرستاده می‌شود
+
+    mid = _send(text)
+    return mid
 
 
 def clear_welcome_media(chat_id):
@@ -366,9 +416,9 @@ def send_bug_report(chat_id, user_id, user_name, text, chat_title=""):
         f"╔══════════════════════╗\n"
         f"🆔 کد گزارش: `#{report_id}`\n"
         f"╚══════════════════════╝\n"
-        f"👤 کاربر: **{user_name}**\n"
+        f"👤 کاربر: **{api.esc_md(user_name)}**\n"
         f"🆔 آیدی: `{user_id}`\n"
-        f"👥 گروه: **{chat_title or '-'}**\n"
+        f"👥 گروه: **{api.esc_md(chat_title or '-')}**\n"
         f"🆔 آیدی گروه: `{chat_id}`\n"
         f"📅 زمان: `{now}`\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -446,7 +496,7 @@ def start_quiz(chat_id, user_id, user_name):
         f"━━━━━━━━━━━━━━━\n"
         f"❓ {q['q']}\n\n"
         f"⏱ ۳۰ ثانیه فرصت\n"
-        f"👤 شروع‌کننده: {user_name}\n"
+        f"👤 شروع‌کننده: {api.esc_md(user_name)}\n"
         f"🆔 `{qid}`",
         markup={"inline_keyboard": rows},
         parse_mode="Markdown")
@@ -502,7 +552,7 @@ def end_quiz(chat_id, qid):
     txt = f"🧠 **نتیجه آزمون**\n"
     txt += f"━━━━━━━━━━━━━━━\n"
     txt += f"❓ {quiz['question']}\n"
-    txt += f"✅ جواب: **{correct_ans}**\n\n"
+    txt += f"✅ جواب: **{api.esc_md(correct_ans)}**\n\n"
 
     if not answered:
         txt += "😐 کسی جواب نداد!"
@@ -601,7 +651,7 @@ def get_weekly_ranking(chat_id):
         name = user_info.get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
         level = user_info.get("level", 1)
         xp = user_info.get("xp", 0)
-        txt += f"{crown} **{name}**\n"
+        txt += f"{crown} **{api.esc_md(name)}**\n"
         txt += f"   💬 {cnt} پیام | 🏅 سطح {level} | ⭐ {xp} XP\n"
     return txt
 
@@ -628,7 +678,7 @@ def get_monthly_ranking(chat_id):
         crown = {1: "👑", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
         user_info = xp_data.get(uid, {})
         name = user_info.get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
-        txt += f"{crown} **{name}** → {cnt} پیام\n"
+        txt += f"{crown} **{api.esc_md(name)}** → {cnt} پیام\n"
     return txt
 
 
@@ -819,7 +869,7 @@ def build_weekly_report(chat_id):
         for i, (uid, cnt) in enumerate(items[:5], 1):
             crown = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
             name = xp_data.get(uid, {}).get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
-            txt += f"{crown} {name} → {cnt} پیام\n"
+            txt += f"{crown} {api.esc_md(name)} → {cnt} پیام\n"
     else:
         txt += "😐 هفته ساکتی بود!"
 
@@ -847,7 +897,7 @@ def send_stats_chart(chat_id, reply_to=None):
     try:
         chat_info = api.get_chat(chat_id)
         if chat_info and chat_info.get("ok"):
-            group_title = chat_info["result"].get("title", "گروه")
+            group_title = api.esc_md(chat_info["result"].get("title", "گروه"))
     except Exception as e:
         print(f"[group_title] {e}")
 
@@ -926,7 +976,7 @@ def send_stats_chart(chat_id, reply_to=None):
         pct = (cnt / total_messages_all * 100) if total_messages_all else 0
         bar_len = min(int(pct / 5), 10)
         bar = "█" * bar_len + "░" * (10 - bar_len)
-        top_text += f"{medals[i]} **{name}**\n"
+        top_text += f"{medals[i]} **{api.esc_md(name)}**\n"
         top_text += f"    💬 `{cnt}` پیام | `{bar}` {pct:.0f}%\n"
 
     if not top_text:
@@ -937,7 +987,7 @@ def send_stats_chart(chat_id, reply_to=None):
     avg_per_day = total / 7 if total else 0
 
     best_day_idx = data.index(max(data)) if data else 0
-    best_day_name = labels[best_day_idx] if labels else "-"
+    best_day_name = api.esc_md(labels[best_day_idx]) if labels else "-"
     best_day_count = max(data) if data else 0
 
     today_top_name = ""
@@ -1066,7 +1116,7 @@ def send_stats_chart(chat_id, reply_to=None):
     if today_top_name:
         caption += (
             f"⚡ **برترین امروز:**\n"
-            f"   🎯 **{today_top_name}** با `{today_top_count}` پیام\n"
+            f"   🎯 **{api.esc_md(today_top_name)}** با `{today_top_count}` پیام\n"
             f"\n"
         )
 

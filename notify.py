@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-import time
+import html
+import urllib.parse
+
 import api
 import storage
 from storage import get, set_
@@ -45,17 +47,21 @@ def get_admins_list(chat_id):
 
 
 def _admin_links(admins):
+    """لیست ادمین‌ها با لینک — parse_mode این پیام‌ها HTML است، پس escape لازم است."""
     lines = []
     for a in admins:
-        name = a.get("name", "ادمین")
+        name = html.escape(str(a.get("name", "ادمین") or "ادمین"))
         uid = a.get("id")
         uname = a.get("username", "")
         status = a.get("status", "")
         icon = "👑" if status == "creator" else "🛡"
         if uname:
-            lines.append(f"{icon} {name} — <a href='https://ble.ir/{uname}'>@{uname}</a>")
+            uname_esc = html.escape(str(uname))
+            uname_url = urllib.parse.quote(str(uname))
+            lines.append(f"{icon} {name} — "
+                         f"<a href='https://ble.ir/{uname_url}'>@{uname_esc}</a>")
         elif uid:
-            lines.append(f"{icon} <a href='tg://user?id={uid}'>{name}</a>")
+            lines.append(f"{icon} <a href='tg://user?id={int(uid)}'>{name}</a>")
         else:
             lines.append(f"{icon} {name}")
     return "\n".join(lines)

@@ -436,7 +436,8 @@ def handle_user_callback(cb, cb_id, data, chat_id, msg_id, user):
         medals = ["🥇", "🥈", "🥉"]
         for i, (uid, u) in enumerate(items, 1):
             m = medals[i - 1] if i <= 3 else f"{i}."
-            txt += f"{m} {u.get('name', 'کاربر')} — {u.get('xp', 0)} XP (سطح {u.get('level', 1)})\n"
+            txt += (f"{m} {api.esc_md(u.get('name', 'کاربر'))} — "
+                    f"{u.get('xp', 0)} XP (سطح {u.get('level', 1)})\n")
 
         api.send(chat_id, txt, parse_mode="Markdown")
         api.answer_callback(cb_id, "")

@@ -79,4 +79,4 @@ def cmd_report(chat_id, user_id, message, user_name):
         api.send(chat_id, "⚠️ روی پیام متخلف ریپلای کن!", reply_to=message["message_id"])
         return
     t = message["reply_to_message"]["from"]
-    api.send(chat_id, f"📢 {user_name} از {admin.u_name(t)} گزارش داد!")
+    api.send(chat_id, f"📢 {api.esc_md(user_name)} از {admin.u_name(t)} گزارش داد!")

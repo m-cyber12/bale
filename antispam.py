@@ -179,6 +179,13 @@ def check(chat_id, user_id, text, message, is_admin_fn):
 # ✅ مجازات — با ذخیره‌سازی خودکار
 # ============================================================
 def _punish(chat_id, user_id, action, reason, threshold):
+    # 🧠 ثبت تخلف در پرونده‌ی شخصیت (لحن با هر تخلف سخت‌تر می‌شود)
+    try:
+        import ai_persona
+        ai_persona.note_violation(chat_id, user_id, "spam")
+    except Exception as e:
+        print(f"[antispam:persona] {e}")
+
     perms_mute = {
         "can_send_messages": False,
         "can_send_media_messages": False,
@@ -203,7 +210,7 @@ def _punish(chat_id, user_id, action, reason, threshold):
 
             api.send_autodelete(
                 chat_id,
-                f"👢 کاربر به دلیل **{threshold}** بار {reason} اخراج شد.",
+                f"👢 کاربر به دلیل **{api.esc_md(threshold)}** بار {reason} اخراج شد.",
                 sec=5, parse_mode="Markdown"
             )
 
@@ -220,7 +227,7 @@ def _punish(chat_id, user_id, action, reason, threshold):
 
             api.send_autodelete(
                 chat_id,
-                f"🚫 کاربر به دلیل **{threshold}** بار {reason} بن شد.",
+                f"🚫 کاربر به دلیل **{api.esc_md(threshold)}** بار {reason} بن شد.",
                 sec=5, parse_mode="Markdown"
             )
 
@@ -238,7 +245,7 @@ def _punish(chat_id, user_id, action, reason, threshold):
 
             api.send_autodelete(
                 chat_id,
-                f"🔇 کاربر به دلیل **{threshold}** بار {reason} ۱۰ دقیقه سکوت شد.",
+                f"🔇 کاربر به دلیل **{api.esc_md(threshold)}** بار {reason} ۱۰ دقیقه سکوت شد.",
                 sec=5, parse_mode="Markdown"
             )
     except Exception as e:
