@@ -41,11 +41,24 @@ PLATFORMS           = bale,telegram        ← خالی بگذاری، خودک�
 
 | فیلد | مقدار |
 |---|---|
-| Runtime | Python 3 |
-| Build Command | `pip install -r requirements.txt` |
-| Start Command | `python3 main.py` |
-| Health Check Path | `/healthz` |
+| **Language / Runtime** | `Python 3` |
+| **Build Command** | `pip install -r requirements.txt` |
+| **Start Command** | `python3 -u main.py` |
+| **Health Check Path** | `/healthz` |
+| **Root Directory** | خالی بگذار |
 | Instance Type | Free (برای تست) / Starter (برای جدی) |
+
+**چرا این‌ها؟**
+
+- `pip install -r requirements.txt` — ربات وابستگی اجباری ندارد، پس این خط
+  در چند ثانیه تمام می‌شود. اگر بعداً کتابخانه‌ای لازم شد، فقط به
+  `requirements.txt` اضافه کن؛ لازم نیست دستور را عوض کنی.
+  (اگر ترجیح می‌دهی بیلد کاملاً بی‌کار باشد: `echo no-deps` هم کار می‌کند.)
+- `python3 -u main.py` — `-u` یعنی لاگ‌ها **بی‌درنگ** در تب Logs ظاهر شوند
+  (وگرنه بافر می‌شوند و فکر می‌کنی ربات کار نمی‌کند). حتماً همین را بزن.
+- Health Check Path را `/healthz` بگذار؛ Render با آن می‌فهمد سرویس سالم است.
+- اگر روزی خواستی گیف اختصاصی هم داشته باشی: در `requirements.txt` خط
+  `Pillow>=10.0.0` را از کامنت دربیار (پیش‌فرض کامنت است تا بیلد سبک بماند).
 
 ---
 
@@ -182,6 +195,8 @@ python3 main.py
 | در لاگ: `❌ اتصال به بله برقرار نشد` | توکن غلط است یا ربات را در BotFather باطل کرده‌ای |
 | ربات جواب نمی‌دهد ولی لاگ ساکت است | سرویس خوابیده — پینگر `/healthz` را راه بینداز (بخش ۳) |
 | `/healthz` باز نمی‌شود | Health Check Path را `/healthz` بگذار و مطمئن شو `PORT` را خودت ست نکرده‌ای (Render خودش می‌دهد) |
+| Build با خطای `No module named ...` می‌خورد | Start Command باید `python3 -u main.py` باشد (نه `python main.py` — رندر `python` ندارد) |
+| لاگ‌ها دیر می‌آیند یا تب Logs خالی است | `-u` را در Start Command فراموش نکن |
 | `🧠 هوش مصنوعی روشن است ولی کلید تنظیم نشده` | `OPENROUTER_API_KEY` را بگذار |
 | داده‌ها بعد از هر دیپلوی پاک می‌شوند | پلن رایگان دیسک ندارد — بخش ۴ |
 | `[bale:sendMessage] HTTP 400` با `parse entities` | باگ escape است؛ لاگ و پیام را بفرست تا درست کنم (تست‌ها این را می‌گیرند) |
