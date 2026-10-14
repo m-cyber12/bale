@@ -1,0 +1,782 @@
+# -*- coding: utf-8 -*-
+"""قابلیت‌های پیشرفته - آلفا"""
+import time
+import threading
+import random
+import re
+from datetime import datetime, timedelta
+import api
+import storage
+from storage import get, set_, update, add_game_win, get_game_leaderboard
+
+try:
+    import questions
+    QUIZ_QUESTIONS = questions.QUIZ_QUESTIONS
+    TRUTHS_POOL = questions.TRUTHS
+    DARES_POOL = questions.DARES
+except Exception as e:
+    print(f"[extras:questions] {e}")
+    QUIZ_QUESTIONS = []
+    TRUTHS_POOL = []
+    DARES_POOL = []
+
+
+# ============================================================
+# گزارش باگ
+# ============================================================
+def send_bug_report(chat_id, user_id, user_name, text, chat_title=""):
+    """ارسال گزارش باگ به مالک ربات"""
+    from config import OWNER_ID
+
+    # ترتیب اولویت: storage bot_owner → OWNER_ID از config
+    owner = 0
+    o = storage.get("bot_owner", "id")
+    if isinstance(o, dict):
+        owner = o.get("id", 0)
+    if not owner:
+        owner = OWNER_ID
+
+    if not owner:
+        return False, "❌ مالک ربات تنظیم نشده."
+
+    report_id = str(int(time.time()))
+    now = datetime.now().strftime("%Y/%m/%d - %H:%M")
+
+    msg = (
+        f"🐛 **گزارش باگ جدید**\n"
+        f"╔══════════════════════╗\n"
+        f"🆔 کد گزارش: `#{report_id}`\n"
+        f"╚══════════════════════╝\n"
+        f"👤 کاربر: **{user_name}**\n"
+        f"🆔 آیدی: `{user_id}`\n"
+        f"👥 گروه: **{chat_title or '-'}**\n"
+        f"🆔 آیدی گروه: `{chat_id}`\n"
+        f"📅 زمان: `{now}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📝 **متن گزارش:**\n\n"
+        f"{text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💡 پاسخ: `/پاسخ {user_id} متن`"
+    )
+
+    try:
+        r = api.send(int(owner), msg, parse_mode="Markdown", reply_to=0)
+        if r and r.get("ok"):
+            reports = storage.get("bug_reports", "list") or {}
+            reports[report_id] = {
+                "user_id": user_id,
+                "user_name": user_name,
+                "chat_id": chat_id,
+                "chat_title": chat_title,
+                "text": text,
+                "time": now,
+                "ts": time.time(),
+            }
+            if len(reports) > 200:
+                keys = sorted(reports.keys(), key=lambda k: reports[k].get("ts", 0))
+                for k in keys[:100]:
+                    del reports[k]
+            storage.set_("bug_reports", "list", reports)
+            return True, report_id
+        else:
+            err = (r or {}).get("description", "خطای نامشخص")
+            print(f"[bug_report] failed: {r}")
+            return False, f"❌ خطا در ارسال: {err}"
+    except Exception as e:
+        print(f"[bug_report] {e}")
+        return False, f"❌ خطا: {e}"
+
+
+# ============================================================
+# آزمون
+# ============================================================
+_quiz_lock = {}
+
+
+def start_quiz(chat_id, user_id, user_name):
+    if chat_id in _quiz_lock:
+        return False, "❌ یه آزمون دیگه در جریانه!"
+
+    if not QUIZ_QUESTIONS:
+        return False, "❌ بانک سوالات خالیه!"
+
+    q = random.choice(QUIZ_QUESTIONS)
+    qid = str(int(time.time())) + str(random.randint(10, 99))
+
+    quiz = {
+        "id": qid,
+        "question": q["q"],
+        "options": q["options"],
+        "answer": q["ans"],
+        "creator": user_id,
+        "started": time.time(),
+        "answered": {},
+    }
+    quizzes = get("quizzes", chat_id) or {}
+    quizzes[qid] = quiz
+    set_("quizzes", chat_id, quizzes)
+    _quiz_lock[chat_id] = qid
+
+    rows = []
+    letters = ["🅰️", "🅱️", "©️", "🆔"]
+    for i, opt in enumerate(q["options"]):
+        rows.append([{"text": f"{letters[i]} {opt}", "callback_data": f"quiz:ans:{qid}:{i}"}])
+
+    api.send(chat_id,
+        f"🧠 **آزمون آلفا**\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"❓ {q['q']}\n\n"
+        f"⏱ ۳۰ ثانیه فرصت\n"
+        f"👤 شروع‌کننده: {user_name}\n"
+        f"🆔 `{qid}`",
+        markup={"inline_keyboard": rows},
+        parse_mode="Markdown")
+
+    def _timeout():
+        time.sleep(30)
+        if _quiz_lock.get(chat_id) == qid:
+            end_quiz(chat_id, qid)
+    threading.Thread(target=_timeout, daemon=True).start()
+
+    return True, "✅ شروع شد!"
+
+
+def answer_quiz(chat_id, user_id, user_name, qid, ans_index):
+    quizzes = get("quizzes", chat_id) or {}
+    quiz = quizzes.get(qid)
+    if not quiz:
+        return False, "❌ آزمون پیدا نشد"
+
+    if str(user_id) in quiz["answered"]:
+        return False, "❗️ قبلا جواب دادی!"
+
+    is_correct = (ans_index == quiz["answer"])
+    quiz["answered"][str(user_id)] = {
+        "name": user_name,
+        "ans": ans_index,
+        "correct": is_correct,
+    }
+    set_("quizzes", chat_id, quizzes)
+
+    if is_correct:
+        add_game_win(chat_id, "quiz", user_id, user_name)
+        return True, "✅ آفرین! درست بود 🎉"
+    else:
+        return True, "❌ اشتباه بود!"
+
+
+def end_quiz(chat_id, qid):
+    quizzes = get("quizzes", chat_id) or {}
+    quiz = quizzes.get(qid)
+    if not quiz:
+        return
+
+    _quiz_lock.pop(chat_id, None)
+
+    answered = quiz["answered"]
+    correct_ans = quiz["options"][quiz["answer"]]
+
+    txt = f"🧠 **نتیجه آزمون**\n"
+    txt += f"━━━━━━━━━━━━━━━\n"
+    txt += f"❓ {quiz['question']}\n"
+    txt += f"✅ جواب: **{correct_ans}**\n\n"
+
+    if not answered:
+        txt += "😐 کسی جواب نداد!"
+    else:
+        correct_users = [(uid, d) for uid, d in answered.items() if d["correct"]]
+        wrong_users = [(uid, d) for uid, d in answered.items() if not d["correct"]]
+
+        if correct_users:
+            txt += f"🎉 **درست ({len(correct_users)}):**\n"
+            for uid, d in correct_users[:10]:
+                txt += f"  ✅ {d['name']}\n"
+        if wrong_users:
+            txt += f"\n❌ **اشتباه ({len(wrong_users)}):**\n"
+            for uid, d in wrong_users[:10]:
+                txt += f"  ❌ {d['name']}\n"
+
+    api.send(chat_id, txt, parse_mode="Markdown")
+
+
+def get_quiz_leaderboard(chat_id):
+    items = get_game_leaderboard(chat_id, "quiz", 10)
+    if not items:
+        return "🧠 هنوز کسی توی آزمون برنده نشده!"
+    txt = "🧠 **لیدربرد آزمون**\n━━━━━━━━━━━━━━━\n"
+    for i, (uid, data) in enumerate(items, 1):
+        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
+        txt += f"{medal} {data.get('name','کاربر')} → {data.get('wins',0)} برد\n"
+    return txt
+
+
+# ============================================================
+# قرعه‌کشی
+# ============================================================
+def draw_lottery(chat_id, user_id, user_name, count=1):
+    today = datetime.now()
+    active_users = {}
+    for i in range(7):
+        d = today - timedelta(days=i)
+        key = f"{chat_id}:{d.strftime('%Y-%m-%d')}"
+        stats = get("msg_stats", key) or {}
+        for uid, cnt in stats.items():
+            active_users[uid] = active_users.get(uid, 0) + cnt
+
+    if len(active_users) < 2:
+        return None, "❌ به اندازه کافی کاربر فعال نداری!"
+
+    uids = list(active_users.keys())
+    weights = [active_users[u] for u in uids]
+
+    if count > len(uids):
+        count = len(uids)
+
+    winners = []
+    pool = uids[:]
+    weights_pool = weights[:]
+    for _ in range(count):
+        if not pool:
+            break
+        w = random.choices(pool, weights=weights_pool, k=1)[0]
+        idx = pool.index(w)
+        pool.pop(idx)
+        weights_pool.pop(idx)
+        winners.append(w)
+
+    return winners, None
+
+
+# ============================================================
+# رتبه‌بندی
+# ============================================================
+def get_weekly_ranking(chat_id):
+    today = datetime.now()
+    users = {}
+    for i in range(7):
+        d = today - timedelta(days=i)
+        key = f"{chat_id}:{d.strftime('%Y-%m-%d')}"
+        stats = get("msg_stats", key) or {}
+        for uid, cnt in stats.items():
+            users[uid] = users.get(uid, 0) + cnt
+
+    if not users:
+        return "❌ هنوز آماری نداریم."
+
+    bot_users = storage.get("bot_users", "list") or {}
+    xp_data = get("xp", chat_id) or {}
+    items = sorted(users.items(), key=lambda x: x[1], reverse=True)
+
+    txt = "👑 **رتبه‌بندی هفتگی**\n━━━━━━━━━━━━━━━\n"
+    for i, (uid, cnt) in enumerate(items[:10], 1):
+        crown = {1: "👑", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
+        user_info = xp_data.get(uid, {})
+        name = user_info.get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
+        level = user_info.get("level", 1)
+        xp = user_info.get("xp", 0)
+        txt += f"{crown} **{name}**\n"
+        txt += f"   💬 {cnt} پیام | 🏅 سطح {level} | ⭐ {xp} XP\n"
+    return txt
+
+
+def get_monthly_ranking(chat_id):
+    today = datetime.now()
+    users = {}
+    for i in range(30):
+        d = today - timedelta(days=i)
+        key = f"{chat_id}:{d.strftime('%Y-%m-%d')}"
+        stats = get("msg_stats", key) or {}
+        for uid, cnt in stats.items():
+            users[uid] = users.get(uid, 0) + cnt
+
+    if not users:
+        return "❌ هنوز آماری نداریم."
+
+    bot_users = storage.get("bot_users", "list") or {}
+    xp_data = get("xp", chat_id) or {}
+    items = sorted(users.items(), key=lambda x: x[1], reverse=True)
+
+    txt = "🏆 **رتبه‌بندی ماهانه**\n━━━━━━━━━━━━━━━\n"
+    for i, (uid, cnt) in enumerate(items[:10], 1):
+        crown = {1: "👑", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
+        user_info = xp_data.get(uid, {})
+        name = user_info.get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
+        txt += f"{crown} **{name}** → {cnt} پیام\n"
+    return txt
+
+
+# ============================================================
+# سیستم دعوت
+# ============================================================
+def track_invite(chat_id, inviter_id, inviter_name, new_user_id, new_user_name):
+    invites = get("invites", chat_id) or {}
+    inviter = invites.get(str(inviter_id), {"name": inviter_name, "count": 0, "users": []})
+    inviter["count"] += 1
+    inviter["users"].append({
+        "id": new_user_id,
+        "name": new_user_name,
+        "time": time.time(),
+    })
+    invites[str(inviter_id)] = inviter
+    set_("invites", chat_id, invites)
+
+
+def get_invite_leaderboard(chat_id):
+    invites = get("invites", chat_id) or {}
+    if not invites:
+        return "🔗 هنوز کسی کسی رو دعوت نکرده!"
+
+    items = sorted(invites.items(), key=lambda x: x[1].get("count", 0), reverse=True)
+    txt = "🔗 **لیدربرد دعوت‌کنندگان**\n━━━━━━━━━━━━━━━\n"
+    for i, (uid, data) in enumerate(items[:10], 1):
+        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
+        txt += f"{medal} {data.get('name','کاربر')} → {data.get('count',0)} نفر\n"
+    return txt
+
+
+def get_user_invites(chat_id, user_id):
+    invites = get("invites", chat_id) or {}
+    data = invites.get(str(user_id))
+    if not data:
+        return "🔗 هنوز کسی رو دعوت نکردی!"
+    return (
+        f"🔗 **دعوت‌های شما**\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"👥 تعداد: `{data.get('count', 0)}` نفر"
+    )
+
+
+# ============================================================
+# ضد فحش
+# ============================================================
+BAD_WORDS_BASE = [
+    "کص", "کیر", "کون", "جنده", "فاحشه", "خارکص", "خارکوس",
+    "گایید", "گاییدم", "گاییدش", "گاییدن", "گاییدین", "گاییدیم",
+    "لاشی", "حرومی", "حرومزاده", "حرومزاد", "بی‌ناموس", "بیناموس",
+    "مادرجنده", "مادرقحبه", "قحبه", "سگ‌مادر", "سگمادر",
+    "پدرسگ", "خواهرجنده", "خواهرکص",
+    "جاکش", "کسکش", "کصکش", "کوسکش",
+    "تخمی", "بی‌شرف", "بیشرف",
+    "کونی", "کونیم", "کونیان", "کونین",
+    "کصلیس", "کصخل", "کوسخل", "خرفت",
+    "دیوث", "دیوس",
+    "اوبی", "اوبیا",
+    "خایه", "خایمال",
+]
+
+BAD_WORDS_REGEX = [
+    r"ک[صس]+[ی]?\s*[کخ]?",
+    r"گ[آا]ی+",
+    r"[کخ]یر",
+    r"ک[وو]ن",
+    r"ج[نن]د[ه]?",
+    r"ل[آآ]ش[یی]",
+    r"ح[رر][وو]م",
+    r"خ[آا]ر[کخ]",
+    r"د[یی][وو][ثص]",
+]
+
+
+def _normalize_for_check(text):
+    if not text:
+        return ""
+    clean = text.lower()
+    clean = clean.replace("\u200c", "")
+    clean = clean.replace("آ", "ا").replace("أ", "ا")
+    clean = re.sub(r"(.)\1{2,}", r"\1", clean)
+    clean = re.sub(r"[\W_]+", "", clean, flags=re.UNICODE)
+    return clean
+
+
+def check_bad_word(text):
+    if not text:
+        return False, None
+    clean = _normalize_for_check(text)
+    for word in BAD_WORDS_BASE:
+        w = word.replace("\u200c", "").replace("آ", "ا")
+        w = re.sub(r"[\W_]+", "", w, flags=re.UNICODE)
+        if w and w in clean:
+            return True, word
+    for pattern in BAD_WORDS_REGEX:
+        if re.search(pattern, clean):
+            return True, pattern
+    return False, None
+
+
+def check_bad_word_with_extra(text, chat_id):
+    if not text:
+        return False, None
+    clean = _normalize_for_check(text)
+    for word in BAD_WORDS_BASE:
+        w = word.replace("\u200c", "").replace("آ", "ا")
+        w = re.sub(r"[\W_]+", "", w, flags=re.UNICODE)
+        if w and w in clean:
+            return True, word
+    for pattern in BAD_WORDS_REGEX:
+        if re.search(pattern, clean):
+            return True, pattern
+    extra = storage.get("extra_bad_words", chat_id) or []
+    for word in extra:
+        if not word:
+            continue
+        w = word.lower().replace("\u200c", "").replace("آ", "ا")
+        w = re.sub(r"[\W_]+", "", w, flags=re.UNICODE)
+        if w and w in clean:
+            return True, word
+    return False, None
+
+
+# ============================================================
+# گزارش هفتگی
+# ============================================================
+_auto_report_started = {}
+
+
+def start_auto_report(chat_id):
+    if chat_id in _auto_report_started:
+        return
+    _auto_report_started[chat_id] = True
+
+    def _run():
+        while True:
+            try:
+                now = datetime.now()
+                days_until_friday = (4 - now.weekday()) % 7
+                if days_until_friday == 0 and now.hour >= 20:
+                    days_until_friday = 7
+                next_friday = now.replace(hour=20, minute=0, second=0, microsecond=0)
+                next_friday += timedelta(days=days_until_friday)
+                if next_friday <= now:
+                    next_friday += timedelta(days=7)
+                sleep_secs = (next_friday - now).total_seconds()
+                time.sleep(sleep_secs)
+                cfg = get("weekly_report", chat_id) or {}
+                if not cfg.get("enabled"):
+                    continue
+                try:
+                    txt = build_weekly_report(chat_id)
+                    api.send(chat_id, txt, parse_mode="Markdown")
+                except Exception as e:
+                    print(f"[weekly_report] {e}")
+            except Exception as e:
+                print(f"[weekly_loop] {e}")
+                time.sleep(3600)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def build_weekly_report(chat_id):
+    today = datetime.now()
+    users = {}
+    total = 0
+    for i in range(7):
+        d = today - timedelta(days=i)
+        key = f"{chat_id}:{d.strftime('%Y-%m-%d')}"
+        stats = get("msg_stats", key) or {}
+        for uid, cnt in stats.items():
+            users[uid] = users.get(uid, 0) + cnt
+            total += cnt
+
+    bot_users = storage.get("bot_users", "list") or {}
+    xp_data = get("xp", chat_id) or {}
+    items = sorted(users.items(), key=lambda x: x[1], reverse=True)
+
+    txt = "📊 **گزارش هفتگی گروه**\n"
+    txt += "━━━━━━━━━━━━━━━\n"
+    txt += f"📅 {today.strftime('%Y/%m/%d')}\n"
+    txt += f"💬 کل پیام‌ها: `{total}`\n"
+    txt += f"👥 کاربران فعال: `{len(users)}`\n\n"
+
+    if items:
+        txt += "👑 **برترین‌های هفته:**\n"
+        for i, (uid, cnt) in enumerate(items[:5], 1):
+            crown = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}.")
+            name = xp_data.get(uid, {}).get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر")
+            txt += f"{crown} {name} → {cnt} پیام\n"
+    else:
+        txt += "😐 هفته ساکتی بود!"
+
+    txt += "\n━━━━━━━━━━━━━━━\n"
+    txt += "🏆 **مدیریت گروه آلفا**"
+    return txt
+
+
+def set_weekly_report(chat_id, enabled):
+    cfg = get("weekly_report", chat_id) or {}
+    cfg["enabled"] = enabled
+    set_("weekly_report", chat_id, cfg)
+    if enabled:
+        start_auto_report(chat_id)
+
+
+# ============================================================
+# نمودار آماری
+# ============================================================
+def send_stats_chart(chat_id, reply_to=None):
+    import urllib.parse
+    import json as _json
+
+    group_title = "گروه"
+    try:
+        chat_info = api.get_chat(chat_id)
+        if chat_info and chat_info.get("ok"):
+            group_title = chat_info["result"].get("title", "گروه")
+    except Exception as e:
+        print(f"[group_title] {e}")
+
+    today = datetime.now()
+    labels = []
+    data = []
+
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        key = f"{chat_id}:{d.strftime('%Y-%m-%d')}"
+        stats = get("msg_stats", key) or {}
+        cnt = sum(stats.values())
+        days_fa = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یک‌شنبه"]
+        day_name = days_fa[d.weekday()]
+        labels.append(f"{day_name} {d.strftime('%m/%d')}")
+        data.append(cnt)
+
+    first_half = sum(data[:3])
+    second_half = sum(data[-3:])
+    if first_half == 0 and second_half == 0:
+        trend = "➡️ **بدون فعالیت**"
+        trend_emoji = "😐"
+        trend_msg = "گروه ساکته، یه حرکت بزنیم!"
+    elif second_half > first_half * 1.3:
+        trend = "📈 **صعودی قوی**"
+        trend_emoji = "🚀"
+        trend_msg = "عالی داریم پیش می‌ریم!"
+    elif second_half > first_half * 1.15:
+        trend = "📈 **صعودی**"
+        trend_emoji = "🔥"
+        trend_msg = "رو به رشده، ادامه بدید!"
+    elif second_half < first_half * 0.7:
+        trend = "📉 **نزولی شدید**"
+        trend_emoji = "💔"
+        trend_msg = "گروه داره سرد میشه، تکونی بخورید!"
+    elif second_half < first_half * 0.85:
+        trend = "📉 **نزولی**"
+        trend_emoji = "❄️"
+        trend_msg = "کمی افت داشتیم، جبران کنیم!"
+    else:
+        trend = "➡️ **ثابت**"
+        trend_emoji = "✅"
+        trend_msg = "روند پایداره"
+
+    if first_half > 0:
+        change_pct = ((second_half - first_half) / first_half) * 100
+        if change_pct > 0:
+            change_txt = f"📈 `+{change_pct:.1f}%` رشد"
+        elif change_pct < 0:
+            change_txt = f"📉 `{change_pct:.1f}%` افت"
+        else:
+            change_txt = "➡️ `0%` بدون تغییر"
+    else:
+        change_txt = "🆕 داده جدید"
+
+    all_users = {}
+    last_day_users = {}
+    for i in range(7):
+        d = today - timedelta(days=i)
+        key = f"{chat_id}:{d.strftime('%Y-%m-%d')}"
+        stats = get("msg_stats", key) or {}
+        for uid, cnt in stats.items():
+            all_users[uid] = all_users.get(uid, 0) + cnt
+            if i == 0:
+                last_day_users[uid] = cnt
+
+    top = sorted(all_users.items(), key=lambda x: x[1], reverse=True)[:5]
+    bot_users = storage.get("bot_users", "list") or {}
+    xp_data = get("xp", chat_id) or {}
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    top_text = ""
+    total_messages_all = sum(all_users.values()) if all_users else 0
+    for i, (uid, cnt) in enumerate(top):
+        name = xp_data.get(uid, {}).get("name", "") or bot_users.get(uid, {}).get("name", f"کاربر {str(uid)[-4:]}")
+        pct = (cnt / total_messages_all * 100) if total_messages_all else 0
+        bar_len = min(int(pct / 5), 10)
+        bar = "█" * bar_len + "░" * (10 - bar_len)
+        top_text += f"{medals[i]} **{name}**\n"
+        top_text += f"    💬 `{cnt}` پیام | `{bar}` {pct:.0f}%\n"
+
+    if not top_text:
+        top_text = "😐 هیچ کاربری پیام نفرستاده"
+
+    total = sum(data)
+    active_count = len(all_users)
+    avg_per_day = total / 7 if total else 0
+
+    best_day_idx = data.index(max(data)) if data else 0
+    best_day_name = labels[best_day_idx] if labels else "-"
+    best_day_count = max(data) if data else 0
+
+    today_top_name = ""
+    today_top_count = 0
+    if last_day_users:
+        today_top = sorted(last_day_users.items(), key=lambda x: x[1], reverse=True)[0]
+        today_top_name = xp_data.get(today_top[0], {}).get("name", "") or bot_users.get(today_top[0], {}).get("name", "")
+        today_top_count = today_top[1]
+
+    bg_colors = []
+    border_colors = []
+    max_val = max(data) if data else 0
+    for val in data:
+        if val == 0:
+            bg_colors.append("rgba(200, 200, 200, 0.5)")
+            border_colors.append("rgba(150, 150, 150, 1)")
+        elif val == max_val:
+            bg_colors.append("rgba(239, 68, 68, 0.85)")
+            border_colors.append("rgba(220, 38, 38, 1)")
+        elif val >= max_val * 0.7:
+            bg_colors.append("rgba(34, 197, 94, 0.8)")
+            border_colors.append("rgba(22, 163, 74, 1)")
+        elif val >= max_val * 0.4:
+            bg_colors.append("rgba(59, 130, 246, 0.8)")
+            border_colors.append("rgba(37, 99, 235, 1)")
+        else:
+            bg_colors.append("rgba(251, 146, 60, 0.8)")
+            border_colors.append("rgba(234, 88, 12, 1)")
+
+    trend_line = []
+    for i in range(len(data)):
+        if i < 2:
+            trend_line.append(None)
+        else:
+            avg = sum(data[i-2:i+1]) / 3
+            trend_line.append(round(avg, 1))
+
+    config = {
+        "type": "bar",
+        "data": {
+            "labels": labels,
+            "datasets": [
+                {
+                    "label": "Payam ha",
+                    "data": data,
+                    "backgroundColor": bg_colors,
+                    "borderColor": border_colors,
+                    "borderWidth": 2,
+                    "borderRadius": 10,
+                    "borderSkipped": False,
+                },
+                {
+                    "type": "line",
+                    "label": "Trend",
+                    "data": trend_line,
+                    "borderColor": "rgba(168, 85, 247, 0.9)",
+                    "borderWidth": 3,
+                    "borderDash": [8, 4],
+                    "pointBackgroundColor": "rgba(168, 85, 247, 1)",
+                    "pointBorderColor": "#fff",
+                    "pointBorderWidth": 2,
+                    "pointRadius": 5,
+                    "fill": False,
+                    "tension": 0.4,
+                }
+            ]
+        },
+        "options": {
+            "title": {
+                "display": True,
+                "text": ["Ammar Gozaresh - 7 Rooz", group_title],
+                "fontSize": 18,
+                "fontColor": "#1f2937",
+                "fontStyle": "bold",
+                "padding": 20,
+            },
+            "subtitle": {
+                "display": True,
+                "text": f"Majmo: {total} Payam | Ozve Faal: {active_count}",
+                "fontSize": 13,
+                "fontColor": "#6b7280",
+            },
+            "legend": {"display": False},
+            "scales": {
+                "yAxes": [{
+                    "ticks": {"beginAtZero": True, "fontColor": "#4b5563", "fontSize": 12},
+                    "gridLines": {"color": "rgba(0,0,0,0.06)", "drawBorder": False}
+                }],
+                "xAxes": [{
+                    "ticks": {"fontColor": "#4b5563", "fontSize": 11},
+                    "gridLines": {"display": False}
+                }]
+            },
+            "animation": {"duration": 1500, "easing": "easeOutQuart"},
+        }
+    }
+
+    try:
+        encoded = urllib.parse.quote(_json.dumps(config, ensure_ascii=False))
+        chart_url = f"https://quickchart.io/chart?c={encoded}&w=750&h=450&bkg=white&devicePixelRatio=2"
+    except Exception as e:
+        print(f"[chart] {e}")
+        chart_url = None
+
+    caption = (
+        f"╔══════════════════════╗\n"
+        f"   📊 **آمار گروه {group_title}**\n"
+        f"╚══════════════════════╝\n"
+        f"\n"
+        f"🗓 **۷ روز اخیر**\n"
+        f"💬 کل پیام‌ها: `{total}` پیام\n"
+        f"👥 اعضای فعال: `{active_count}` نفر\n"
+        f"📊 میانگین روزانه: `{avg_per_day:.1f}` پیام\n"
+        f"\n"
+        f"🔥 **روند کلی:**\n"
+        f"   {trend} {trend_emoji}\n"
+        f"   {change_txt}\n"
+        f"   _{trend_msg}_\n"
+        f"\n"
+        f"🏆 **پرفعالیت‌ترین روز:**\n"
+        f"   🥇 `{best_day_name}`\n"
+        f"   💬 `{best_day_count}` پیام\n"
+        f"\n"
+    )
+
+    if today_top_name:
+        caption += (
+            f"⚡ **برترین امروز:**\n"
+            f"   🎯 **{today_top_name}** با `{today_top_count}` پیام\n"
+            f"\n"
+        )
+
+    caption += (
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👑 **پنج نفر برتر هفته**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{top_text}"
+        f"\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 **مدیریت گروه آلفا** 💫\n"
+        f"_{today.strftime('%A %Y/%m/%d')}_"
+    )
+
+    weekday_fa = {
+        "Monday": "دوشنبه", "Tuesday": "سه‌شنبه", "Wednesday": "چهارشنبه",
+        "Thursday": "پنجشنبه", "Friday": "جمعه", "Saturday": "شنبه", "Sunday": "یک‌شنبه"
+    }
+    for en, fa in weekday_fa.items():
+        caption = caption.replace(en, fa)
+
+    if chart_url:
+        r = api.request("sendPhoto", {
+            "chat_id": chat_id,
+            "photo": chart_url,
+            "caption": caption,
+            "parse_mode": "Markdown",
+        })
+        if r and r.get("ok"):
+            return r
+
+    return api.send(chat_id, caption, parse_mode="Markdown", reply_to=reply_to)
+
+
+def get_random_truth():
+    return random.choice(TRUTHS_POOL) if TRUTHS_POOL else "رازی نداری؟ 😅"
+
+
+def get_random_dare():
+    return random.choice(DARES_POOL) if DARES_POOL else "یه کار باحال بکن! 🎉"
