@@ -7,16 +7,65 @@ import urllib.error
 import json
 import socket
 import threading
+import platforms
 from config import BASE_URL
 
 BOT_ID = None
 
 _reply_ctx = threading.local()
+#: پیام‌رسانی که همین حالا در حال پردازش آپدیتش هستیم (thread-local)
+_ctx = threading.local()
 
 # متدهایی که سرور 501 داده — با TTL، چون یک 501 گذرا نباید
 # برای همیشه یک قابلیت (مثل getChatMember) را خاموش کند
+# کلید: (پیام‌رسان، متد)
 _unsupported_methods = {}
 _UNSUPPORTED_TTL = 900
+
+
+# ============================================================
+# 🛰 انتخاب پیام‌رسان برای هر درخواست
+# ============================================================
+def set_platform(key):
+    """هنگام پردازش آپدیت، پیام‌رسانش را اینجا ثبت می‌کنیم."""
+    try:
+        _ctx.platform = platforms.resolve_key(key)
+    except Exception:
+        pass
+
+
+def clear_platform():
+    if hasattr(_ctx, "platform"):
+        try:
+            del _ctx.platform
+        except Exception:
+            pass
+
+
+def current_platform_key():
+    return getattr(_ctx, "platform", None)
+
+
+def platform_for(data=None, platform=None):
+    """۱) صریح  ۲) آپدیت در حال پردازش  ۳) نقشه‌ی چت  ۴) پیش‌فرض"""
+    if platform is not None:
+        return platforms.get(platform) if isinstance(platform, str) else platform
+
+    key = current_platform_key()
+    if key:
+        return platforms.get(key)
+
+    chat_id = None
+    if isinstance(data, dict):
+        chat_id = data.get("chat_id")
+        if chat_id is None:
+            chat_id = data.get("from_chat_id")
+    if chat_id is not None:
+        plat = platforms.platform_of_chat(chat_id)
+        if plat:
+            return plat
+
+    return platforms.default()
 
 
 def set_reply_context(msg_id):
@@ -78,6 +127,20 @@ def _is_parse_error(r):
            ("can't find start" in desc) or ("unsupported start tag" in desc)
 
 
+def _pm(chat_id, mode, platform=None):
+    """parse_mode را به چیزی که این پیام‌رسان قبول می‌کند ترجمه می‌کند.
+
+    اگر پلتفرم آن حالت را نداشته باشد None برمی‌گردد (متن خام = امن‌ترین).
+    """
+    if not mode:
+        return None
+    try:
+        plat = platform_for({"chat_id": chat_id}, platform)
+        return plat.parse_mode(mode)
+    except Exception:
+        return mode
+
+
 def _plain_retry(method, d):
     """تلاش دوباره بدون parse_mode تا پیام اصلاً گم نشود."""
     d2 = dict(d)
@@ -92,71 +155,33 @@ def _plain_retry(method, d):
 _answered_cbs = {}
 
 
-def request(method, data=None, timeout=30):
-    _uns_ts = _unsupported_methods.get(method)
+def _call(method, data=None, timeout=30, platform=None):
+    """صدا زدن request با تحمل امضاهای ساده‌تر (مثل شبیه‌سازها)."""
+    try:
+        return request(method, data, timeout=timeout, platform=platform)
+    except TypeError:
+        return request(method, data, timeout=timeout)
+
+
+def request(method, data=None, timeout=30, platform=None):
+    """درخواست به API — پیام‌رسان از روی chat_id / context انتخاب می‌شود."""
+    plat = platform_for(data, platform)
+    cache_key = (getattr(plat, "key", "?"), method)
+    _uns_ts = _unsupported_methods.get(cache_key)
     if _uns_ts and time.time() - _uns_ts < _UNSUPPORTED_TTL:
-        return {"ok": False, "error_code": 501, "description": "Method not supported (cached)"}
+        return {"ok": False, "error_code": 501,
+                "description": "Method not supported (cached)"}
 
-    url = BASE_URL + method
-    try:
-        if data:
-            body = urllib.parse.urlencode(data).encode('utf-8')
-            req = urllib.request.Request(url, data=body)
-        else:
-            req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        if e.code == 501:
-            _unsupported_methods[method] = time.time()
-            return {"ok": False, "error_code": 501, "description": "Not Implemented"}
-
-        SILENT_METHODS = (
-            "getChatMember", "getChatAdministrators",
-            "banChatMember", "restrictChatMember",
-            "deleteMessage", "editMessageText",
-            "answerCallbackQuery",
-            "editMessageReplyMarkup",
-            "pinChatMessage", "unpinChatMessage",
-            "setChatPermissions",
-        )
-        if method not in SILENT_METHODS:
-            print(f"[api:{method}] HTTP {e.code}")
-        return {"ok": False, "error_code": e.code, "description": str(e)}
-    except (urllib.error.URLError, socket.timeout) as e:
-        print(f"[api:{method}] Network: {e}")
-        return {"ok": False, "error_code": 0, "description": str(e)}
-    except Exception as e:
-        print(f"[api:{method}] {e}")
-        return {"ok": False, "error_code": -1, "description": str(e)}
+    r = plat.request(method, data, timeout=timeout)
+    if r and not r.get("ok") and r.get("error_code") == 501:
+        _unsupported_methods[cache_key] = time.time()
+    return r
 
 
-def get_updates(offset=None, timeout=30):
-    url = BASE_URL + "getUpdates"
-    params = {
-        "timeout": timeout,
-        "allowed_updates": json.dumps([
-            "message",
-            "callback_query",
-            "edited_message",
-            "channel_post",
-            "edited_channel_post",
-            "inline_query",
-            "chosen_inline_result",
-        ]),
-    }
-    if offset:
-        params["offset"] = offset
-    url += "?" + urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(url, timeout=timeout + 10) as r:
-            return json.loads(r.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        print(f"[getUpdates] HTTP {e.code}")
-        return None
-    except Exception as e:
-        print(f"[getUpdates] {e}")
-        return None
+def get_updates(offset=None, timeout=30, platform=None):
+    """long-polling روی پیام‌رسان مشخص (پیش‌فرض: اصلی)."""
+    plat = platform_for(None, platform)
+    return plat.get_updates(offset=offset, timeout=timeout)
 
 
 def _has_copy_text(markup):
@@ -200,6 +225,7 @@ def send(chat_id, text, reply_to=None, markup=None, parse_mode=None):
     d = {"chat_id": chat_id, "text": text}
     if reply_to:
         d["reply_to_message_id"] = reply_to
+    parse_mode = _pm(chat_id, parse_mode)
     if parse_mode:
         d["parse_mode"] = parse_mode
     if markup:
@@ -227,6 +253,7 @@ def send(chat_id, text, reply_to=None, markup=None, parse_mode=None):
 
 def send_no_reply(chat_id, text, parse_mode=None, markup=None):
     d = {"chat_id": chat_id, "text": text}
+    parse_mode = _pm(chat_id, parse_mode)
     if parse_mode:
         d["parse_mode"] = parse_mode
     if markup:
@@ -266,6 +293,7 @@ def send_autodelete(chat_id, text, sec=5, parse_mode=None, markup=None):
 
 def edit_message(chat_id, msg_id, text, markup=None, parse_mode=None):
     d = {"chat_id": chat_id, "message_id": msg_id, "text": text}
+    parse_mode = _pm(chat_id, parse_mode)
     if parse_mode:
         d["parse_mode"] = parse_mode
     if markup:
@@ -421,63 +449,52 @@ def set_chat_permissions(chat_id, perms):
         return None
 
 
-def upload_file(method, files_dict, data_dict=None, timeout=120):
-    boundary = "----AlfaBoundary" + str(int(time.time() * 1000))
-    body = b""
-
-    if data_dict:
-        for key, value in data_dict.items():
-            body += f"--{boundary}\r\n".encode("utf-8")
-            body += f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8")
-            body += f"{value}\r\n".encode("utf-8")
-
-    for key, filepath in files_dict.items():
-        filename = os.path.basename(filepath)
-        with open(filepath, "rb") as f:
-            file_data = f.read()
-        body += f"--{boundary}\r\n".encode("utf-8")
-        body += f'Content-Disposition: form-data; name="{key}"; filename="{filename}"\r\n'.encode("utf-8")
-        body += b"Content-Type: application/octet-stream\r\n\r\n"
-        body += file_data
-        body += b"\r\n"
-
-    body += f"--{boundary}--\r\n".encode("utf-8")
-
-    url = BASE_URL + method
-    req = urllib.request.Request(url, data=body)
-    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-    req.add_header("Content-Length", str(len(body)))
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        print(f"[api:upload:{method}] HTTP {e.code}")
-        return {"ok": False, "error_code": e.code}
-    except Exception as e:
-        print(f"[api:upload:{method}] {e}")
-        return None
+def upload_file(method, files_dict, data_dict=None, timeout=120, platform=None):
+    """آپلود فایل چندبخشی (عکس/ویدیو/گیف)."""
+    plat = platform_for(data_dict, platform)
+    return plat.request(method, data_dict, timeout=timeout, files=files_dict)
 
 
-def me():
+#: شناسه‌ی ربات روی هر پیام‌رسان (چون روی هر کدام یک ربات جدا هستیم)
+_BOT_IDS = {}
+
+
+def me(platform=None, force=False):
+    """شناسه‌ی ربات روی پیام‌رسان مشخص.
+
+    همیشه از مسیر `request` می‌رود تا تست‌ها/شبیه‌سازها هم کار کنند
+    (اگر مستقیم روی پلتفرم برود، شبیه‌ساز دور زده می‌شود).
+    """
     global BOT_ID
-    r = request("getMe")
+    plat = platform_for(None, platform)
+    key = getattr(plat, "key", "default")
+    if not force and key in _BOT_IDS:
+        return _BOT_IDS[key]
+
+    r = _call("getMe", None, platform=plat)
     if r and r.get("ok"):
-        BOT_ID = r["result"]["id"]
-    return BOT_ID
+        rid = (r.get("result") or {}).get("id")
+        _BOT_IDS[key] = rid
+        BOT_ID = rid                    # سازگاری با کدهای قدیمی
+        return rid
+    return None
 
 
-def bot_id():
-    if BOT_ID is None:
-        me()
-    return BOT_ID
+def bot_id(chat_id=None):
+    """شناسه‌ی ربات در همان پیام‌رسانی که این چت رویش است."""
+    plat = platform_for({"chat_id": chat_id} if chat_id is not None else None)
+    key = getattr(plat, "key", "default")
+    if key in _BOT_IDS:
+        return _BOT_IDS[key]
+    return me(platform=plat)
 
 
-def get_bot_username():
+def get_bot_username(platform=None):
     """گرفتن یوزرنیم ربات"""
-    r = request("getMe")
+    plat = platform_for(None, platform)
+    r = _call("getMe", None, platform=plat)
     if r and r.get("ok"):
-        return (r["result"].get("username", "") or "").strip()
+        return (r.get("result", {}).get("username", "") or "").strip()
     return ""
 
 

@@ -130,12 +130,36 @@ def set_config(**kw):
         return c
 
 
+#: متغیرهای محیطی‌ای که کلید از آن‌ها خوانده می‌شود (به‌ترتیب اولویت)
+KEY_ENVS = ("OPENROUTER_API_KEY", "OPENROUTER_KEY", "OPENROUTER_TOKEN",
+            "OPENROUTER_API_TOKEN")
+
+
+def env_api_key():
+    """کلید از متغیر محیطی (خالی اگر نباشد)."""
+    for name in KEY_ENVS:
+        val = (os.environ.get(name) or "").strip()
+        if val:
+            return val
+    return ""
+
+
 def api_key():
-    """کلید API — اول فایل تنظیمات، بعد متغیر محیطی."""
-    key = (config().get("api_key") or "").strip()
-    if not key:
-        key = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
-    return key
+    """کلید API — **متغیر محیطی اولویت دارد**، بعد کلید ذخیره‌شده در پنل.
+
+    روی Render کلید را در Environment بگذار؛ آن‌وقت پنل هم همان را
+    نشان می‌دهد و هیچ کلیدی داخل دیسک/گیت ذخیره نمی‌شود.
+    """
+    return env_api_key() or (config().get("api_key") or "").strip()
+
+
+def key_source():
+    """کلید از کجا می‌آید؟ env | panel | none"""
+    if env_api_key():
+        return "env"
+    if (config().get("api_key") or "").strip():
+        return "panel"
+    return "none"
 
 
 def set_api_key(key):
@@ -152,7 +176,7 @@ def set_enabled(flag):
 
 def ready():
     """آیا الان می‌شود روی AI حساب کرد؟"""
-    if not enabled() or not api_key():
+    if not api_key() or not enabled():
         return False
     if time.time() - _key_invalid[0] < 600:
         return False
@@ -711,6 +735,7 @@ def status():
     return {
         "enabled": enabled(),
         "key_set": bool(api_key()),
+        "key_source": key_source(),
         "models_total": len(models),
         "chain": chain[:8],
         "top": [m["id"] for m in models[:5]],

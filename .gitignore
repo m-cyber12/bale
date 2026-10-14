@@ -8,3 +8,8 @@ data/
 
 # گزارش اجرای تست‌ها
 tests/last_run.json
+
+# متغیرهای محیطی (توکن‌ها)
+.env
+.env.*
+!.env.example

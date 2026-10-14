@@ -1,62 +1,155 @@
 # -*- coding: utf-8 -*-
-"""تنظیمات ربات.
+"""تنظیمات ربات — همه‌چیز از متغیر محیطی.
 
-⚠️ توکن ربات **در کد نگه داشته نمی‌شود**. اولویت خواندن:
+⚠️ هیچ توکنی در کد نگه داشته نمی‌شود.
 
-  1) متغیر محیطی  `BALE_TOKEN`
-  2) فایل        `data/token.txt`   (داخل .gitignore هست)
-  3) متغیر محیطی  `BOT_TOKEN`  (برای سازگاری با ستاپ‌های قدیمی)
+توکن پیام‌رسان‌ها (هر کدام که بگذاری همان فعال می‌شود):
 
-نمونه‌ی اجرا:
+    BALE_TOKEN        توکن ربات بله
+    TELEGRAM_TOKEN    توکن ربات تلگرام
+    WEBHOOK_TOKEN     رمز دلخواهِ ورودی وب‌هوک (اختیاری)
 
-    BALE_TOKEN=123:abc python3 main.py
+و برای انتخاب دستی:
+
+    PLATFORM=bale                فقط یکی
+    PLATFORMS=bale,telegram      چند تا با هم (هر کدام polling خودش)
+    PLATFORMS=webhook            فقط وب‌هوک عمومی
+
+بقیه:
+
+    OPENROUTER_API_KEY   کلید هوش مصنوعی (اختیاری — از پنل هم می‌شود)
+    OWNER_ID             آیدی مالک ربات
+    DATA_DIR             پوشه‌ی داده‌ها (روی Render: مسیر دیسک)
+    PORT                 اگر ست باشد، وب‌سرور سلامت/webhook بالا می‌آید
+
+نمونه اجرا:
+
+    BALE_TOKEN=123:abc OPENROUTER_API_KEY=sk-or-v1-... python3 main.py
 """
 import os
 
-DATA_DIR = os.environ.get("BALE_DATA_DIR") or "data"
+# ============================================================
+# پوشه‌ی داده‌ها
+# ============================================================
+DATA_DIR = (os.environ.get("DATA_DIR")
+            or os.environ.get("BALE_DATA_DIR")
+            or "data")
+DATA_DIR_ENV = DATA_DIR
+
+ADMIN_CACHE_TTL = 60
 
 
-def _read_token():
-    for env in ("BALE_TOKEN", "BOT_TOKEN"):
-        t = (os.environ.get(env) or "").strip()
-        if t:
-            return t
-    path = os.path.join(DATA_DIR, "token.txt")
+# ============================================================
+# مالک ربات
+# ============================================================
+def _owner_id():
+    for env in ("OWNER_ID", "BALE_OWNER_ID", "TELEGRAM_OWNER_ID"):
+        raw = (os.environ.get(env) or "").strip()
+        if raw:
+            try:
+                return int(raw)
+            except ValueError:
+                print(f"[config] {env} عدد نیست: {raw!r}")
+    return 234775012
+
+
+OWNER_ID = _owner_id()
+
+
+# ============================================================
+# پیام‌رسان‌ها (توکن از env — جای دیگری نگه نمی‌داریم)
+# ============================================================
+def active_platforms():
+    """لیست پیام‌رسان‌های فعال (از platforms/__init__.py)."""
     try:
-        if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read().strip()
+        import platforms
+        return platforms.enabled()
     except Exception as e:
-        print(f"[config] خطا در خواندن {path}: {e}")
+        print(f"[config] خطا در خواندن پیام‌رسان‌ها: {e}")
+        return []
+
+
+def primary_platform():
+    try:
+        import platforms
+        plats = platforms.enabled()
+        if plats:
+            return plats[0]
+    except Exception:
+        pass
+    return None
+
+
+def _primary_token():
+    plat = primary_platform()
+    if plat:
+        return plat.token
+    # هیچ پلتفرمی فعال نشد → متغیرهای رایج را برای پیام خطای بهتر بگرد
+    for env in ("BALE_TOKEN", "BOT_TOKEN", "TOKEN", "TELEGRAM_TOKEN"):
+        val = (os.environ.get(env) or "").strip()
+        if val:
+            return val
     return ""
 
 
-TOKEN = _read_token()
+#: توکن پیام‌رسان اصلی — برای سازگاری با کدهای قدیمی
+TOKEN = _primary_token()
 
-# اگر توکن نباشد، BASE_URL خالی می‌ماند تا خطای واضح بدهیم نه آدرس خراب
-BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}/" if TOKEN else ""
 
-DATA_DIR_ENV = DATA_DIR
-ADMIN_CACHE_TTL = 60
+def base_url():
+    plat = primary_platform()
+    return plat.api_url() if plat and plat.configured() else ""
 
-try:
-    OWNER_ID = int(os.environ.get("BALE_OWNER_ID") or 234775012)
-except ValueError:
-    OWNER_ID = 234775012
+
+#: آدرس API پیام‌رسان اصلی (اگر توکن نباشد خالی است)
+BASE_URL = base_url()
 
 
 def has_token():
-    return bool(TOKEN)
+    return bool(TOKEN) or bool(active_platforms())
+
+
+def port():
+    """پورت وب‌سرور (Render خودش ست می‌کند)."""
+    raw = (os.environ.get("PORT") or "").strip()
+    try:
+        return int(raw) if raw else 0
+    except ValueError:
+        return 0
+
+
+def web_server_enabled():
+    """اگر PORT ست شده باشد (Render / هر میزبان وب) سرور بالا می‌آید."""
+    return bool(port()) or (os.environ.get("WEB_SERVER") or "").strip() in (
+        "1", "true", "yes", "on")
 
 
 def token_hint():
-    """راهنمای فارسی وقتی توکن تنظیم نشده."""
+    """راهنمای فارسی وقتی هیچ توکنی تنظیم نشده."""
     return (
-        "❌ توکن ربات تنظیم نشده!\n"
-        "  یکی از این دو کار را بکن:\n"
-        "  1) متغیر محیطی:\n"
-        "       export BALE_TOKEN=\"123456:ABC...\"\n"
-        "  2) یا توکن را در فایل زیر بگذار:\n"
-        f"       {os.path.join(DATA_DIR, 'token.txt')}\n"
-        "  (این فایل داخل .gitignore است و کامیت نمی‌شود)\n"
+        "❌ هیچ توکنی تنظیم نشده — ربات نمی‌تواند وصل شود.\n\n"
+        "  روی سرور (Render) این‌ها را در Environment بگذار:\n"
+        "      BALE_TOKEN = توکن ربات بله\n"
+        "      TELEGRAM_TOKEN = توکن ربات تلگرام (اگر می‌خواهی)\n"
+        "      PLATFORMS = bale,telegram   (یا فقط bale)\n\n"
+        "  روی سیستم خودت:\n"
+        "      export BALE_TOKEN=\"123456:ABC...\"\n"
+        f"      یا توکن را در فایل بگذار: {os.path.join(DATA_DIR, 'bale_token.txt')}\n"
     )
+
+
+def env_report():
+    """خلاصه‌ی وضعیت تنظیمات (بدون لو دادن توکن‌ها) — برای لاگ و /healthz"""
+    plats = active_platforms()
+    return {
+        "data_dir": os.path.abspath(DATA_DIR),
+        "owner_id": OWNER_ID,
+        "platforms": [p.key for p in plats],
+        "tokens_set": {p.key: bool(p.token) for p in plats},
+        "openrouter_key": bool(
+            (os.environ.get("OPENROUTER_API_KEY")
+             or os.environ.get("OPENROUTER_KEY")
+             or os.environ.get("OPENROUTER_TOKEN") or "").strip()),
+        "port": port(),
+        "web_server": web_server_enabled(),
+    }

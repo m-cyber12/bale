@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import sys
 sys.path.insert(0, ".")
 
@@ -27,6 +28,7 @@ import ai
 import ai_persona
 import ai_panel
 import config
+import platforms
 from config import OWNER_ID
 
 
@@ -102,7 +104,7 @@ def is_bot_admin_in_group(chat_id):
         if now - ts < 120:
             return val
     try:
-        r = api.get_member(chat_id, api.bot_id())
+        r = api.get_member(chat_id, api.bot_id(chat_id))
         if r and r.get("ok"):
             st = r["result"].get("status", "")
             result = st in ("administrator", "creator")
@@ -603,7 +605,21 @@ def _handle_todd_callback(cb, cb_id, data, chat_id, msg_id, user):
     api.answer_callback(cb_id, "❓")
 
 
-def handle(update):
+def handle(update, platform_key=None):
+    """پردازش یک آپدیت.
+
+    `platform_key` می‌گوید این آپدیت از کدام پیام‌رسان آمده؛ همه‌ی
+    ارسال‌های این آپدیت (و تایمرهایش) به همان جا برمی‌گردند.
+    """
+    if platform_key:
+        api.set_platform(platform_key)
+    try:
+        _handle_inner(update)
+    finally:
+        api.clear_platform()
+
+
+def _handle_inner(update):
     if update.get("chat_member") or update.get("my_chat_member"):
         try:
             cm = update.get("chat_member") or update.get("my_chat_member")
@@ -818,6 +834,8 @@ def handle(update):
     user_id = user.get("id")
     if not user_id:
         return
+
+    _remember_platform(m)
     user_name = admin.u_name(user)
     raw_text = (m.get("text") or "").strip()
     text = normalize(raw_text)
@@ -847,6 +865,19 @@ def handle(update):
         traceback.print_exc()
     finally:
         api.clear_reply_context()
+
+
+def _remember_platform(m):
+    """چت → پیام‌رسان را ذخیره می‌کند تا تایمرها/پیام‌های بعدی درست بروند."""
+    try:
+        cid = (m.get("chat") or {}).get("id")
+        if cid is None:
+            return
+        key = api.current_platform_key()
+        if key:
+            platforms.remember_chat(key, cid)
+    except Exception as e:
+        print(f"[platforms:remember] {e}")
 
 
 def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
@@ -1810,7 +1841,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
     if m.get("new_chat_members"):
         api.clear_reply_context()
         for member in m["new_chat_members"]:
-            if member.get("id") == api.bot_id():
+            if member.get("id") == api.bot_id(chat_id):
                 time.sleep(1.5)
                 _bot_admin_cache.pop(chat_id, None)
                 try:
@@ -3315,50 +3346,121 @@ def send_broadcast_forward(chat_id, user_id, from_chat_id, message_id, target):
     api.send(chat_id, result_txt, parse_mode="Markdown")
 
 
+def _poll_loop(plat):
+    """حلقه‌ی long-polling یک پیام‌رسان (هر پلتفرم نخ خودش)."""
+    name = plat.key
+    offset = 0
+    err = 0
+    while True:
+        try:
+            r = plat.get_updates(offset=offset + 1, timeout=30)
+            if r and r.get("ok") and r.get("result"):
+                for raw in r["result"]:
+                    try:
+                        uid = raw.get("update_id")
+                        if isinstance(uid, int) and uid > offset:
+                            offset = uid
+                        upd = plat.normalize(raw)
+                        if not upd:
+                            continue
+                        handle(upd, name)
+                    except Exception as e:
+                        print(f"[handle:{name}] {e}")
+                err = 0
+            elif r and not r.get("ok"):
+                err += 1
+                time.sleep(min(err * 2, 20))
+            time.sleep(0.3)
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            err += 1
+            print(f"[poll:{name}] {e}")
+            time.sleep(min(err * 5, 30))
+
+
 def main():
     print("=" * 50)
     print("🏆 مدیریت گروه آلفا روشن شد!")
     print("=" * 50)
 
-    if not config.has_token():
+    plats = platforms.enabled()
+
+    # ------------------------------------------------------------
+    # وب‌سرور (Render / health-check / webhook) — همیشه اول بالا بیاید
+    # تا اگر تنظیمات ناقص بود، بتوانی از /healthz علت را ببینی
+    # ------------------------------------------------------------
+    import server
+    server.set_handler(handle)
+    if config.web_server_enabled():
+        server.start(config.port())
+    else:
+        print("ℹ️  وب‌سرور خاموش است (برای روشن‌کردن: متغیر PORT را ست کن)")
+
+    if not plats:
         print(config.token_hint())
+        if config.web_server_enabled():
+            print("⏳ سرور بالا است ولی هیچ پیام‌رسانی وصل نشد — "
+                  "وضعیت: /healthz")
+            while True:
+                time.sleep(3600)
         return
+
+    for plat in plats:
+        hint = ", ".join(plat.token_envs) or "—"
+        print(f"📡 پیام‌رسان فعال: {plat.title} ({plat.key}) — توکن از {hint}")
+    if len(plats) > 1:
+        print(f"🔀 حالت چند-پیام‌رسانی: {', '.join(p.key for p in plats)}")
+
     if ai.enabled():
         if ai.api_key():
-            print("🧠 موتور هوش مصنوعی: روشن (OpenRouter)")
+            print("🧠 موتور هوش مصنوعی: روشن (OpenRouter)"
+                  + (" — کلید از env" if os.environ.get("OPENROUTER_API_KEY")
+                     else " — کلید از پنل"))
         else:
             print("🧠 هوش مصنوعی روشن است ولی کلید OpenRouter تنظیم نشده.")
-            print("   برای تنظیم: پیوی ربات → پنل → 🧠 هوش مصنوعی → 🔑")
+            print("   کلید را در Environment بگذار: OPENROUTER_API_KEY")
+            print("   یا در پیوی ربات: پنل → 🧠 هوش مصنوعی → 🔑")
 
     storage.load()
-    bid = api.me()
-    if not bid:
-        print("❌ خطا در اتصال.")
-        return
-    print(f"✅ متصل - شناسه: {bid}")
 
-    offset = 0
-    err = 0
-    while True:
-        try:
-            r = api.get_updates(offset=offset + 1, timeout=30)
-            if r and r.get("ok") and r.get("result"):
-                for u in r["result"]:
-                    offset = u["update_id"]
-                    try:
-                        handle(u)
-                    except Exception as e:
-                        print(f"[handle] {e}")
-                err = 0
-            time.sleep(0.3)
-        except KeyboardInterrupt:
-            print("\n⛔️ متوقف شد.")
-            storage.save()
-            break
-        except Exception as e:
-            err += 1
-            print(f"[main] {e}")
-            time.sleep(min(err * 5, 30))
+    # ------------------------------------------------------------
+    # اتصال و polling
+    # ------------------------------------------------------------
+    pollers = []
+    for plat in plats:
+        if plat.webhook_based:
+            print(f"🔗 {plat.title}: از راه وب‌هوک (/webhook/{plat.key})")
+            continue
+        who = plat.me()
+        if not who:
+            print(f"❌ اتصال به {plat.title} برقرار نشد (توکن یا شبکه).")
+            continue
+        uname = f" (@{who.get('username')})" if who.get("username") else ""
+        print(f"✅ متصل به {plat.title}{uname} — شناسه: {who.get('id')}")
+        pollers.append(plat)
+
+    if not pollers:
+        print("❌ هیچ پیام‌رسان قابل pollingی وصل نشد.")
+        if config.web_server_enabled():
+            print("⏳ سرور بالا می‌ماند تا از /healthz علت را ببینی "
+                  "(توکن/شبکه را چک کن).")
+            while True:
+                time.sleep(3600)
+        return
+
+    threads = []
+    for plat in pollers[1:]:
+        t = threading.Thread(target=_poll_loop, args=(plat,), daemon=True,
+                             name=f"poll-{plat.key}")
+        t.start()
+        threads.append(t)
+
+    try:
+        _poll_loop(pollers[0])          # نخ اصلی
+    except KeyboardInterrupt:
+        print("\n⛔️ متوقف شد.")
+        storage.save()
 
 
 if __name__ == "__main__":

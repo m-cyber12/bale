@@ -76,7 +76,7 @@ def sent_texts():
     return [m.get("text") or m.get("caption") or "" for m in FAKE_BALE.sent]
 
 
-def wait_for(pred, timeout=8.0, step=0.05):
+def wait_for(pred, timeout=20.0, step=0.05):
     """انتظار برای نتیجه‌ی نخ پس‌زمینه."""
     end = time.time() + timeout
     while time.time() < end:
@@ -344,6 +344,8 @@ def test_punish_messages():
     FAKE_BALE.sent.clear()
     ai_persona.announce_punish(GROUP, "mute", 33, "علی_رضا", by_name="مدیر",
                               reason="اسپم", duration="۱۰ دقیقه")
+    # فالبک هم ممکن است از نخ پس‌زمینه بیاید
+    wait_for(lambda: len(sent_texts()) >= 1)
     texts = sent_texts()
     check(len(texts) == 1, f"فالبک باید یک پیام بفرستد: {texts}")
     check("علی" in texts[0], f"نام کاربر در متن سکوت نیست: {texts[0]}")

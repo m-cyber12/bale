@@ -168,7 +168,7 @@ class FakeBaleAPI:
     # ----------------------------------------------------------
     #                       request
     # ----------------------------------------------------------
-    def request(self, method, data=None, timeout=30):
+    def request(self, method, data=None, timeout=30, **kwargs):
         data = dict(data or {})
         with self.lock:
             self.calls.append((method, data))
@@ -332,7 +332,7 @@ class FakeBaleAPI:
             self.stray_escapes.append(txt[:300])
 
     # ----------------------------------------------------------
-    def get_updates(self, offset=None, timeout=30):
+    def get_updates(self, offset=None, timeout=30, **kwargs):
         return {"ok": True, "result": []}   # polling در تست استفاده نمی‌شود
 
     def upload_file(self, method, files_dict, data_dict=None, timeout=120):

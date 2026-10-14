@@ -1,0 +1,44 @@
+# ============================================================
+#  Blueprint رندر — ربات مدیریت گروه آلفا
+#  استفاده: در Render → New → Blueprint → همین ریپو را انتخاب کن
+#  بعد از ساخته‌شدن، توکن‌ها را در Environment بگذار (یا همین‌جا
+#  با sync: false که یعنی «خودم در داشبورد وارد می‌کنم»).
+# ============================================================
+services:
+  - type: web
+    name: alpha-group-bot
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python3 -u main.py"
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # --- پیام‌رسان‌ها -------------------------------------------------
+      # اگر PLATFORMS را نگذاری، هر پیام‌رسانی که توکنش ست شده باشد
+      # خودکار فعال می‌شود (مثلاً فقط BALE_TOKEN داری → فقط بله).
+      # برای چندتایی: مقدار bale,telegram را در داشبورد بگذار.
+      - key: PLATFORMS
+        sync: false
+      - key: BALE_TOKEN
+        sync: false          # مقدارش را در داشبورد Render وارد کن
+      - key: TELEGRAM_TOKEN
+        sync: false          # اگر تلگرام هم می‌خواهی
+      - key: WEBHOOK_TOKEN
+        sync: false          # اگر می‌خواهی پیام‌رسان دلخواه وصل کنی
+      # --- هوش مصنوعی ---------------------------------------------------
+      - key: OPENROUTER_API_KEY
+        sync: false
+      # --- ربات ---------------------------------------------------------
+      - key: OWNER_ID
+        sync: false          # آیدی عددی خودت
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # روی free tier دیسک وجود ندارد؛ اگر پلن پولی گرفتی و دیسک وصل
+      # کردی، این را روی مسیر همان دیسک بگذار (مثلاً /var/data):
+      - key: DATA_DIR
+        value: data
