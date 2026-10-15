@@ -55,6 +55,7 @@ def _blank(uid, name=""):
         "violations": {},        # نوع تخلف → تعداد
         "notes": [],             # یادداشت‌های کوتاه AI
         "last_said": [],         # آخرین جمله‌هایی که AI گفته (برای تکرار نشدن)
+        "chat_log": [],          # آخرین پرسش/پاسخ‌های گفتگو (حافظه‌ی کوتاه)
     }
 
 
@@ -306,6 +307,23 @@ _BASE_RULES = """تو «آلفا» هستی، دستیار مدیریت گروه
   مجازات اعلام‌شده را عوض نمی‌کنی.
 """
 
+#: قواعد حالت «گفتگو» — وقتی کاربر روی پیام ربات ریپلای می‌کند
+CHAT_RULES = """تو «آلفا» هستی، دستیار گروه در پیام‌رسان بله (نه تلگرام).
+کاربر روی پیام تو ریپلای کرده و دارد با تو حرف می‌زند؛ این یک گفتگوست.
+
+قواعد:
+- فقط فارسی، کوتاه و انسانی (۱ تا ۴ جمله). مثل یک آدم واقعی جواب بده.
+- اگر سؤالش درباره‌ی گروه/قوانین/آمار/مدیریت بود، از «اطلاعات واقعی گروه»
+  که در ادامه می‌آید استفاده کن و عدد از خودت درنیار.
+- اگر چیز بی‌ربطی پرسید، کوتاه و بی‌تعارف جواب بده و یادآوری کن که
+  کار اصلی‌ات مدیریت گروه است؛ بحث طولانی راه نینداز.
+- هیچ‌وقت نگو «من یک هوش مصنوعی هستم» و اسم مدل را نبر.
+- از مارک‌داون فقط **بولد** استفاده کن؛ ستاره/آندرلاین/بک‌تیک تکی نه.
+- خودت هیچ اقدامی (بن، سکوت، اخراج) انجام نمی‌دهی؛ فقط توضیح می‌دهی.
+- اگر از تو خواست کسی را بن/سکوت کنی، بگو که این کار را باید ادمین
+  با دستور خودش انجام بدهد.
+"""
+
 _STYLES = [
     "کوتاه و ضربه‌ای بنویس",
     "خودمانی و رفاقتی ولی محترم",
@@ -389,6 +407,56 @@ def user_prompt_for_welcome(chat_id, new_id, new_name, chat_title):
         f"یک نکته‌ی کوتاه یادآوری کن (مثل خواندن قوانین). "
         f"از مارک‌داون تکی استفاده نکن. فقط متن پیام."
     )
+
+
+def remember_turn(chat_id, user_id, question, answer, keep=3):
+    """آخرین گفتگوها را نگه می‌دارد تا AI یادش بماند چه گفتیم."""
+    q = (question or "").strip()[:200]
+    a = (answer or "").strip()[:200]
+    if not q:
+        return
+
+    def f(p):
+        log = p.setdefault("chat_log", [])
+        log.append({"q": q, "a": a, "ts": time.time()})
+        p["chat_log"] = log[-keep:]
+    _mutate(chat_id, user_id, f)
+
+
+def _chat_history(info, keep=3):
+    log = (info or {}).get("chat_log") or []
+    if not log:
+        return ""
+    lines = []
+    for turn in log[-keep:]:
+        lines.append(f"  کاربر: {turn.get('q','')}")
+        if turn.get("a"):
+            lines.append(f"  تو: {turn.get('a','')}")
+    return "\nگفتگوی قبلی همین کاربر (ادامه‌اش باش، تکرار نکن):\n" + \
+           "\n".join(lines) + "\n"
+
+
+def reply_prompt(question, chat_id, chat_title, user_id, user_name,
+                 quoted="", group_facts=""):
+    """پرامپت پاسخ به ریپلای (حالت گفتگو)."""
+    info = rank_info(chat_id, user_id)
+    body = (
+        f"گروه: {chat_title}\n"
+        f"کاربر: {user_name} — {info['rank']}، {info['days']} روز عضویت، "
+        f"سطح {info['level']}\n"
+        f"لحن تو با او: {TONE_LABELS[info['tone']]}\n"
+    )
+    if quoted:
+        body += f"\nپیام تو که کاربر رویش ریپلای کرده:\n{quoted[:400]}\n"
+    body += _chat_history(info)
+    if group_facts:
+        body += f"\nاطلاعات واقعی گروه (فقط برای همین‌ها از این عددها استفاده کن):\n{group_facts}\n"
+    body += (
+        f"\nحرف کاربر: {question}\n\n"
+        f"جواب کوتاه و طبیعی بده. سبک: {_style(info['tone'])}.\n"
+        f"فقط متن پاسخ، بدون توضیح اضافه."
+    )
+    return body
 
 
 # ============================================================
@@ -746,6 +814,112 @@ def local_answer(question, chat_id):
         f"🚫 بن: `{len(banned)}` | 🔒 قفل: `{len(locks)}`\n\n"
         "برای جزئیات بپرس: «وضعیت گروه»، «اخطارها»، «قوانین»."
     )
+
+
+# ============================================================
+# گفتگو: کاربر روی پیام ربات ریپلای می‌کند (حالت چت)
+# ============================================================
+REPLY_COOLDOWN = 3.0              # فاصله‌ی حداقلی بین دو پاسخ برای یک کاربر
+_reply_ts = {}                    # (chat_id, user_id) → آخرین زمان پاسخ
+
+
+def _cooldown_ok(chat_id, user_id, now=None):
+    now = now or time.time()
+    key = (str(chat_id), str(user_id))
+    last = _reply_ts.get(key, 0)
+    if now - last < REPLY_COOLDOWN:
+        return False
+    _reply_ts[key] = now
+    if len(_reply_ts) > 2000:                 # جلوگیری از رشد نامحدود
+        cut = now - 3600
+        for k in [k for k, v in _reply_ts.items() if v < cut]:
+            _reply_ts.pop(k, None)
+    return True
+
+
+#: جواب‌های آماده برای حالت گفتگو (وقتی AI در دسترس نیست) — به تفکیک لحن
+_REPLY_CANNED = {
+    0: [
+        "🙂 {n} جان، الان نمی‌تونم درست فکر کنم — چند لحظه بعد دوباره ریپلای کن.",
+        "🌱 {n} عزیز، الان مغزم در دسترس نیست. کمی بعد امتحان کن.",
+        "😅 {n} جان، الان یه کم شلوغم. بعداً بپرس، حتماً جواب می‌دم.",
+    ],
+    1: [
+        "🙂 الان نمی‌تونم جواب بدم؛ کمی بعد دوباره پرس‌وجو کن.",
+        "⏳ فعلاً دستم بسته است. بعداً دوباره امتحان کن.",
+    ],
+    2: [
+        "⏳ الان پاسخ‌دهی‌ام در دسترس نیست. بعداً بپرس.",
+        "🙂 فعلاً نمی‌توانم جواب بدهم؛ بعداً امتحان کن.",
+    ],
+    3: [
+        "⏳ در دسترس نیستم. بعداً بپرس.",
+        "فعلاً جوابی ندارم. بعداً امتحان کن.",
+    ],
+    4: [
+        "⏳ الان در دسترس نیستم.",
+        "فعلاً جواب نمی‌دهم. بعداً بپرس.",
+    ],
+}
+
+
+def reply_canned(name="", tone=0):
+    """جواب آماده‌ی متنوع وقتی AI در دسترس نیست."""
+    pool = _REPLY_CANNED.get(min(int(tone or 0), MAX_TONE)) or _REPLY_CANNED[0]
+    return random.choice(pool).replace("{n}", name or "دوست من")
+
+
+def answer_reply(chat_id, user_id, user_name, text, chat_title="",
+                 quoted="", reply_to=None):
+    """جواب به ریپلای روی پیام ربات — با AI، وگرنه پاسخ آماده.
+
+    هرگز خطا/لیمیت نشان نمی‌دهد؛ در بدترین حالت یک جمله‌ی کوتاه می‌گوید.
+    """
+    text = (text or "").strip()
+    if not text:
+        return "empty"
+
+    if not _cooldown_ok(chat_id, user_id):
+        return "cooldown"
+
+    tone = effective_tone(chat_id, user_id)
+    safe_name = api.esc_md(user_name or "")
+
+    def _send(body):
+        api.send(chat_id, body, parse_mode="Markdown", reply_to=reply_to)
+
+    def _fallback_text():
+        # اگر سؤال مدیریتی بود، همان جواب برنامه‌نویسی‌شده‌ی دقیق را بده
+        local = None
+        try:
+            local = local_answer(text, chat_id)
+        except Exception as e:
+            print(f"[persona:reply-local] {e}")
+        return local or reply_canned(user_name, tone)
+
+    if not ai.ready():
+        _send(_fallback_text())
+        return "canned"
+
+    msgs = [
+        {"role": "system", "content": CHAT_RULES},
+        {"role": "user", "content": reply_prompt(
+            text[:600], chat_id, chat_title or "گروه", user_id, user_name,
+            quoted=(quoted or "")[:400], group_facts=group_facts(chat_id))},
+    ]
+
+    def _deliver(answer, model):
+        answer = (answer or "").strip()
+        if not answer or str(model).startswith("fallback"):
+            _send(_fallback_text())
+            return
+        _send(ai.safe_md(answer))
+        remember_said(chat_id, user_id, answer)
+        remember_turn(chat_id, user_id, text, answer)
+        note_note(chat_id, user_id, f"در گفتگو گفت: {text[:60]}")
+
+    ai.chat_async(msgs, _deliver, fallback="", max_tokens=340, purpose="reply")
+    return "ai"
 
 
 def answer_question(chat_id, user_id, user_name, question, chat_title="",

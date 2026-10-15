@@ -29,6 +29,7 @@ TMP = tempfile.mkdtemp(prefix="bale_ai_")
 import config            # noqa: E402
 config.DATA_DIR = TMP
 
+import json              # noqa: E402
 import fake_bale         # noqa: E402
 import fake_openrouter   # noqa: E402
 import api               # noqa: E402
@@ -616,6 +617,231 @@ def test_welcome_flow():
     print("  ✓ خوش‌آمد: AI / فالبک / متن دلخواه / بدون member_id")
 
 
+# ============================================================
+# ۱۷) ریپلای روی پیام ربات → جواب AI
+# ============================================================
+def test_reply_to_bot():
+    import main as bot_main
+    import admin
+
+    reset_all()
+    storage.set_("ai_group", GROUP, {"reply": True})
+    storage.set_("ai_profiles", GROUP, {})
+    ai.set_api_key(OR.key)
+    ai.refresh_models(force=True)
+    admin._admin_cache.clear()
+
+    bot_user = fake_bale.make_user(999, "AlphaBot", "alpha_test_bot",
+                                   is_bot=True)
+    FAKE_BALE.statuses[(GROUP, 11)] = "creator"
+
+    import ai_persona as persona
+
+    def clear_cd():
+        """cooldown گفتگو را پاک کن تا هر سناریو مستقل باشد."""
+        persona._reply_ts.clear()
+
+    def reply_msg(user, text, quoted_text="پیام قبلی ربات"):
+        quoted = fake_bale.make_message(GROUP, bot_user, quoted_text,
+                                        message_id=5001, chat_type="supergroup")
+        return fake_bale.make_message(GROUP, user, text, message_id=5002,
+                                      reply_to=quoted)
+
+    # ---- با AI: جواب ساخته‌شده‌ی AI می‌آید ----
+    OR.reply = "آره، با یه دستور می‌تونی کلمه ممنوعه اضافه کنی."
+    FAKE_BALE.sent.clear()
+    clear_cd()
+    bot_main.handle({"update_id": 90001, "message": reply_msg(ADMIN, "چطور کلمه ممنوعه اضافه کنم؟")})
+    ok = wait_for(lambda: any("کلمه ممنوعه اضافه" in t for t in sent_texts()))
+    check(ok, f"جواب AI به ریپلای نیامد: {sent_texts()}")
+    check(OR.calls, "به OpenRouter درخواستی نرفت")
+
+    # ---- پیام ربات در پرامپت هست (context) ----
+    last_payload = OR.calls[-1][1]
+    joined = json.dumps(last_payload, ensure_ascii=False)
+    check("پیام قبلی ربات" in joined,
+          "متن پیام ریپلای‌شده در پرامپت نبود")
+    check("آلفا هستی" in joined or "دستیار" in joined,
+          "پرامپت حالت گفتگو استفاده نشد")
+
+    # ---- با AI خراب → جواب آماده (نه پیام خطا) ----
+    reset_all()
+    ai.set_api_key(OR.key)
+    ai.refresh_models(force=True)
+    OR.default_behavior = 429
+    FAKE_BALE.sent.clear()
+    clear_cd()
+    bot_main.handle({"update_id": 90002, "message": reply_msg(ADMIN, "سلام")})
+    ok = wait_for(lambda: len(sent_texts()) >= 1)
+    check(ok, "فالبک جواب نیامد")
+    if sent_texts():
+        t = sent_texts()[0]
+        low = t.lower()
+        bad = ("429", "limit", "rate", "quota", "error", "لیمیت", "سهمیه",
+               "خطای", "محدودیت")
+        check(not any(w in low for w in bad),
+              f"پیام خطا/لیمیت به کاربر نشان داده شد: {t!r}")
+        check(len(t.strip()) > 10, f"جواب فالبک خیلی کوتاه است: {t!r}")
+
+    # ---- سؤال مدیریتی بدون AI → جواب دقیق از داده ----
+    reset_all()
+    ai.set_api_key("")
+    storage.set_("warnings", GROUP, {"22": 2})
+    FAKE_BALE.sent.clear()
+    clear_cd()
+    bot_main.handle({"update_id": 90003, "message": reply_msg(ADMIN, "اخطارها")})
+    ok = wait_for(lambda: len(sent_texts()) >= 1)
+    check(ok, "جواب آماده نیامد")
+    check(any("علی" in t or "اخطار" in t for t in sent_texts()),
+          f"جواب آماری درست نبود: {sent_texts()}")
+
+    # ---- قابلیت خاموش → ربات اصلاً جواب نمی‌دهد ----
+    reset_all()
+    ai.set_api_key(OR.key)
+    ai.refresh_models(force=True)
+    ai_panel.set_group_setting(GROUP, "reply", False)
+    FAKE_BALE.sent.clear()
+    clear_cd()
+    bot_main.handle({"update_id": 90004, "message": reply_msg(ADMIN, "سلام")})
+    time.sleep(0.4)
+    check(not sent_texts(), f"با خاموش‌بودن قابلیت نباید جوابی بیاید: {sent_texts()}")
+    ai_panel.set_group_setting(GROUP, "reply", True)
+
+    # ---- ریپلای روی پیام یک کاربر عادی → ربات جواب نمی‌دهد ----
+    reset_all()
+    ai.set_api_key(OR.key)
+    ai.refresh_models(force=True)
+    other = fake_bale.make_user(77, "آرش", "arash")
+    normal_quoted = fake_bale.make_message(GROUP, other, "سلام دوستان",
+                                           message_id=6001, chat_type="supergroup")
+    FAKE_BALE.sent.clear()
+    clear_cd()
+    bot_main.handle({"update_id": 90005,
+                     "message": fake_bale.make_message(GROUP, ADMIN, "چه خبر؟",
+                                                       message_id=6002,
+                                                       reply_to=normal_quoted)})
+    time.sleep(0.4)
+    check(not any("خبر" in t or "سلام" in t for t in sent_texts()),
+          f"ریپلای روی پیام کاربر عادی نباید AI را فعال کند: {sent_texts()}")
+
+    # ---- در پیوی هم کار می‌کند (mask: مسیر پیوی return زودهنگام دارد) ----
+    reset_all()
+    ai.set_api_key(OR.key)
+    ai.refresh_models(force=True)
+    clear_cd()
+    OR.reply = "از پنل → کلمات ممنوعه."
+    bot_q = fake_bale.make_message(PV, bot_user, "چی می‌خوای بدونی؟",
+                                   message_id=7101, chat_type="private")
+    FAKE_BALE.sent.clear()
+    bot_main.handle({"update_id": 90009,
+                     "message": fake_bale.make_message(
+                         PV, ADMIN, "چطور کلمه ممنوعه اضافه کنم؟",
+                         message_id=7102, chat_type="private", reply_to=bot_q)})
+    ok = wait_for(lambda: any("کلمات ممنوعه" in t for t in sent_texts()))
+    check(ok, f"در پیوی جواب AI نیامد: {sent_texts()}")
+
+    # ---- ضد سیل: دو ریپلای پشت‌سرهم → فقط یکی جواب می‌گیرد ----
+    reset_all()
+    ai.set_api_key(OR.key)
+    ai.refresh_models(force=True)
+    clear_cd()
+    FAKE_BALE.sent.clear()
+    bot_main.handle({"update_id": 90006, "message": reply_msg(ADMIN, "یکی")})
+    bot_main.handle({"update_id": 90007, "message": reply_msg(ADMIN, "دو")})
+    time.sleep(0.6)
+    check(len(sent_texts()) <= 1,
+          f"cooldown کار نکرد؛ {len(sent_texts())} پیام: {sent_texts()}")
+
+    # ---- محتوای خطرناک: اقدام واقعی انجام نمی‌شود ----
+    reset_all()
+    ai.set_api_key(OR.key)
+    ai.refresh_models(force=True)
+    OR.reply = "باشه، بنش کردم!"
+    FAKE_BALE.sent.clear()
+    clear_cd()
+    FAKE_BALE.calls.clear()         # فقط فراخوانی‌های بعد از این لحظه را بشمار
+    bot_main.handle({"update_id": 90008,
+                     "message": reply_msg(ADMIN, "علی رو بن کن")})
+    wait_for(lambda: len(FAKE_BALE.sent) >= 1)
+    bans = [c for c in FAKE_BALE.calls if c[0] == "banChatMember"]
+    check(not bans, f"AI نباید خودش بن کند: {bans}")
+    print("  ✓ ریپلای: AI / فالبک / داده‌ی واقعی / خاموش / anti-spam / بدون اقدام")
+
+
+
+
+# ============================================================
+# ۱۸) وقتی ربات را ادمین می‌کنند → پیام تأیید + راهنما
+# ============================================================
+def test_promoted_to_admin():
+    import main as bot_main
+    import admin
+
+    reset_all()
+    FAKE_BALE.sent.clear()
+    admin._admin_cache.clear()
+    bot_main._bot_admin_cache.clear()
+
+    bot_user = fake_bale.make_user(999, "AlphaBot", "alpha_test_bot",
+                                  is_bot=True)
+    upd = {
+        "update_id": 91001,
+        "my_chat_member": {
+            "chat": {"id": GROUP, "type": "supergroup", "title": "گروه تست"},
+            "from": ADMIN,
+            "date": int(time.time()),
+            "old_chat_member": {"user": bot_user, "status": "member"},
+            "new_chat_member": {"user": bot_user, "status": "administrator"},
+        },
+    }
+    bot_main.handle(upd, "bale")
+    wait_for(lambda: len(FAKE_BALE.sent) >= 1)
+    texts = sent_texts()
+    check(texts, "بعد از ادمین‌شدن هیچ پیامی نیامد")
+    if texts:
+        t = texts[0]
+        check("ادمین" in t, f"متن تأیید ادمین‌شدن نیست: {t[:60]!r}")
+        check("ریپلای" in t or "هوش مصنوعی" in t,
+              "راهنمای هوش مصنوعی در پیام تأیید نیست")
+        check("پنل" in t and "راهنما" in t, "راهنمای شروع در پیام نیست")
+
+    # ارتقای دوباره (همان وضعیت) → پیام تکراری نباید بیاید
+    FAKE_BALE.sent.clear()
+    upd2 = dict(upd)
+    upd2 = {"update_id": 91002, "my_chat_member": upd["my_chat_member"]}
+    upd2["my_chat_member"] = dict(upd["my_chat_member"])
+    upd2["my_chat_member"]["old_chat_member"] = {
+        "user": bot_user, "status": "administrator"}
+    bot_main.handle(upd2, "bale")
+    time.sleep(0.3)
+    check(not FAKE_BALE.sent, f"رویداد تکراری نباید پیام بدهد: {sent_texts()}")
+
+    # اخراج ربات → نباید کرش کند و پیامی هم ندهد
+    FAKE_BALE.sent.clear()
+    upd3 = {"update_id": 91003, "my_chat_member": {
+        "chat": {"id": GROUP, "type": "supergroup"},
+        "from": ADMIN, "date": int(time.time()),
+        "old_chat_member": {"user": bot_user, "status": "administrator"},
+        "new_chat_member": {"user": bot_user, "status": "left"}}}
+    bot_main.handle(upd3, "bale")
+    time.sleep(0.3)
+    check(not FAKE_BALE.sent, "خروج ربات نباید پیام بدهد")
+
+    # رویداد عضویت اعضای عادی از همان مسیر chat_member
+    FAKE_BALE.sent.clear()
+    upd4 = {"update_id": 91004, "chat_member": {
+        "chat": {"id": GROUP, "type": "supergroup"},
+        "from": ADMIN, "date": int(time.time()),
+        "old_chat_member": {"user": NEWBIE, "status": "left"},
+        "new_chat_member": {"user": NEWBIE, "status": "member"}}}
+    bot_main.handle(upd4, "bale")
+    seen = storage.get("members_seen", GROUP) or {}
+    check("33" in seen, f"عضو جدید در لیست اعضا ثبت نشد: {list(seen)[:5]}")
+    print("  ✓ ادمین‌شدن: پیام تأیید، بدون تکرار، بدون کرش")
+
+
+
+
 def main():
     tests = [
         ("کشف و رتبه‌بندی مدل‌ها", test_model_discovery),
@@ -634,6 +860,8 @@ def main():
         ("گاردهای مصرف", test_guards),
         ("جریان کلید OpenRouter", test_key_flow),
         ("خوش‌آمدگویی با AI", test_welcome_flow),
+        ("ریپلای روی پیام ربات", test_reply_to_bot),
+        ("ادمین‌شدن ربات", test_promoted_to_admin),
     ]
     print("=" * 70)
     print("تست موتور هوش مصنوعی و شخصیت کاربران")

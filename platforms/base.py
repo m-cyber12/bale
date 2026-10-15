@@ -40,6 +40,8 @@ class Platform:
         "message", "callback_query", "edited_message",
         "channel_post", "edited_channel_post", "inline_query",
         "chosen_inline_result",
+        # عضویت/ارتقا: بدون این‌ها ربات نمی‌فهمد ادمین شده یا کسی وارد/خارج شد
+        "my_chat_member", "chat_member", "chat_join_request",
     )
     #: اگر True باشد یعنی آپدیت‌ها از راه وب‌هوک می‌آیند، نه long-polling
     webhook_based = False

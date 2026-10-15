@@ -334,6 +334,19 @@ HELP = """📖 راهنمای ربات آلفا
 `روزانه` | `هفتگی` | `ماهانه`
 
 ━━━━━━━━━━━━━━━
+💬 حرف زدن با ربات
+━━━━━━━━━━━━━━━
+روی هر پیامی که من فرستادم **ریپلای** کن و
+سؤالت را بنویس — با هوش مصنوعی جواب می‌دم.
+
+مثال‌ها:
+`چطور کلمه ممنوعه اضافه کنم؟`
+`وضعیت گروه چطوره؟`
+`من چند روزه عضوم؟`
+
+(ادمین‌ها: `هوش مصنوعی سؤالت` هم کار می‌کنه)
+
+━━━━━━━━━━━━━━━
 🏆 تیم آلفا
 ━━━━━━━━━━━━━━━
 """
@@ -425,6 +438,23 @@ def send_not_admin_warning(chat_id, reply_to=None):
         "ممنون از همراهی‌ات 🌟",
         parse_mode="Markdown",
         reply_to=reply_to)
+
+
+def send_bot_promoted(chat_id):
+    """وقتی ربات را ادمین می‌کنند — تأیید + راهنمای سریع."""
+    api.send(chat_id,
+        "🎉 **ممنون که ادمینم کردی!**\n\n"
+        "از الان می‌تونم گروه رو کامل مدیریت کنم.\n\n"
+        "👑 **برای شروع:**\n"
+        "• بنویس `پنل` → پنل مدیریت گروه\n"
+        "• بنویس `راهنما` → راهنمای کامل دستورها\n"
+        "• بنویس `قفل‌ها` → قفل لینک/عکس/فوروارد و …\n"
+        "• بنویس `سرگرمی` → بازی‌ها\n\n"
+        "🧠 **هوش مصنوعی:** روی هر پیامی که من می‌فرستم ریپلای کن و "
+        "سؤالت را بنویس — همان‌جا جواب می‌دم.\n"
+        "(`هوش مصنوعی وضعیت گروه چطوره؟` هم کار می‌کنه)\n\n"
+        "⚙️ هر تنظیمی را می‌خواهی از `پنل` انجام بده.",
+        parse_mode="Markdown", reply_to=0)
 
 
 def send_bot_welcome(chat_id):
@@ -620,9 +650,43 @@ def handle(update, platform_key=None):
 
 
 def _handle_inner(update):
-    if update.get("chat_member") or update.get("my_chat_member"):
+    # ------------------------------------------------------------
+    # تغییر وضعیت خودِ ربات (ادمین شدن / اخراج شدن)
+    # ------------------------------------------------------------
+    if update.get("my_chat_member"):
         try:
-            cm = update.get("chat_member") or update.get("my_chat_member")
+            cm = update["my_chat_member"]
+            chat = cm.get("chat", {}) or {}
+            chat_id = chat.get("id")
+            new_status = (cm.get("new_chat_member") or {}).get("status", "")
+            old_status = (cm.get("old_chat_member") or {}).get("status", "")
+            if not chat_id or new_status == old_status:
+                return
+            _bot_admin_cache.pop(chat_id, None)          # کش را خالی کن
+            try:
+                from admin import _admin_cache
+                for k in [k for k in _admin_cache if k[0] == chat_id]:
+                    _admin_cache.pop(k, None)
+            except Exception:
+                pass
+
+            if new_status in ("administrator", "creator"):
+                print(f"[my_chat_member] ربات ادمین شد در {chat_id}")
+                try:
+                    locks.apply_permissions(chat_id)
+                except Exception as e:
+                    print(f"[apply_perms:promoted] {e}")
+                send_bot_promoted(chat_id)
+            elif new_status in ("left", "kicked"):
+                print(f"[my_chat_member] ربات از {chat_id} خارج شد")
+            return
+        except Exception as e:
+            print(f"[my_chat_member] {e}")
+        return
+
+    if update.get("chat_member"):
+        try:
+            cm = update.get("chat_member")
             chat_id = cm.get("chat", {}).get("id")
             if not chat_id:
                 return
@@ -867,6 +931,30 @@ def _handle_inner(update):
         api.clear_reply_context()
 
 
+def _maybe_ai_reply(m, chat, chat_id, user_id, user_name, raw_text, msg_id):
+    """ریپلای روی پیام ربات → جواب هوش مصنوعی.
+
+    اگر پیام ریپلای روی پیام خودِ ربات باشد و قابلیت روشن باشد،
+    جواب می‌دهد و True برمی‌گرداند (تا بقیه‌ی مسیرها اجرا نشوند).
+    """
+    try:
+        replied = m.get("reply_to_message") or {}
+        if not (raw_text and replied):
+            return False
+        if (replied.get("from") or {}).get("id") != api.bot_id(chat_id):
+            return False
+        if not (ai_panel.feature_on(chat_id, "reply") and ai.enabled()):
+            return False
+        quoted = replied.get("text") or replied.get("caption") or ""
+        ai_persona.answer_reply(chat_id, user_id, user_name, raw_text,
+                                chat_title=(chat or {}).get("title", ""),
+                                quoted=quoted, reply_to=msg_id)
+        return True
+    except Exception as e:
+        print(f"[reply-ai] {e}")
+        return False
+
+
 def _remember_platform(m):
     """چت → پیام‌رسان را ذخیره می‌کند تا تایمرها/پیام‌های بعدی درست بروند."""
     try:
@@ -1053,6 +1141,11 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
                 return
             t, markup = user_panels.user_main_panel(chat_id, user_id)
             api.send(chat_id, t, parse_mode="Markdown", markup=markup, reply_to=0)
+            return
+
+        # 🧠 ریپلای روی پیام ربات در پیوی → جواب هوش مصنوعی
+        if _maybe_ai_reply(m, chat, chat_id, user_id, user_name, raw_text,
+                           msg_id):
             return
 
         return
@@ -1902,6 +1995,10 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
         return
 
     if not user:
+        return
+
+    # 🧠 ریپلای روی پیام ربات → جواب هوش مصنوعی
+    if _maybe_ai_reply(m, chat, chat_id, user_id, user_name, raw_text, msg_id):
         return
 
     is_user_admin = admin.is_admin(chat_id, user_id)
