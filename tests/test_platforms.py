@@ -603,6 +603,136 @@ def test_handle_platform_context():
     print("  ✓ context آپدیت: پاسخ همیشه روی همان پیام‌رسان")
 
 
+# ============================================================
+# ۱۱) مالک ربات: عدد یا نام کاربری + دستور «آیدی من»
+# ============================================================
+def test_owner_from_env():
+    """OWNER_ID هم عدد می‌گیرد هم نام کاربری."""
+    import config
+
+    def with_env(**env):
+        old = {k: os.environ.get(k) for k in env}
+        for k, v in env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        try:
+            return config._owner_from_env()
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    for k in ("OWNER_ID", "BALE_OWNER_ID", "TELEGRAM_OWNER_ID",
+              "OWNER_USERNAME", "OWNER_USER", "BALE_OWNER_USERNAME",
+              "TELEGRAM_OWNER_USERNAME"):
+        os.environ.pop(k, None)
+
+    uid, uname = with_env(OWNER_ID="123456789")
+    check(uid == 123456789 and uname == "", f"عدد درست خوانده نشد: {(uid, uname)}")
+
+    uid, uname = with_env(OWNER_ID="@Spinner5698")
+    check(uid == 0 and uname == "spinner5698",
+          f"نام کاربری داخل OWNER_ID خوانده نشد: {(uid, uname)}")
+
+    uid, uname = with_env(OWNER_ID="  Spinner5698  ")
+    check(uid == 0 and uname == "spinner5698",
+          f"نام کاربری بدون @ خوانده نشد: {(uid, uname)}")
+
+    uid, uname = with_env(OWNER_USERNAME="@Spinner5698")
+    check(uid == 0 and uname == "spinner5698",
+          f"OWNER_USERNAME خوانده نشد: {(uid, uname)}")
+
+    uid, uname = with_env(OWNER_ID="+98 912", OWNER_USERNAME="Spinner5698")
+    check(uname == "spinner5698", f"ترکیب عدد بی‌معنی + نام کاربری: {(uid, uname)}")
+    print("  ✓ مالک از env: عدد / @نام‌کاربری / OWNER_USERNAME")
+
+
+def test_id_command_and_owner_claim():
+    """«آیدی من» عدد را می‌گوید و مالک با نام کاربری خودکار ثبت می‌شود."""
+    import config
+    import storage
+    import panels
+    import main as bot_main
+
+    fresh()
+    api.request = ORIGINAL_REQUEST
+    api.get_updates = ORIGINAL_GET_UPDATES
+    api.upload_file = ORIGINAL_UPLOAD
+
+    storage.load()
+    storage.set_("bot_owner", "id", {})
+    storage.set_("platforms", "chat_map", {})
+    storage.set_("bot_admins", "list", {})
+
+    old_uid = config.OWNER_ID
+    old_uname = getattr(config, "OWNER_USERNAME", "")
+    config.OWNER_ID = 0
+    config.OWNER_USERNAME = "spinner5698"
+
+    platforms.get("bale")
+    rec = Recorder("bale")
+    platforms._INSTANCES["bale"].request = rec.request
+
+    try:
+        # ۱) پیوی مالک → ثبت خودکار + پیام خوش‌آمد مالکی
+        owner = fake_bale.make_user(778899, "اسپینر", "Spinner5698")
+        bot_main.handle({"update_id": 71001, "message": fake_bale.make_message(
+            778899, owner, "سلام", chat_type="private")}, "bale")
+        check(panels.get_owner_id() == 778899,
+              f"مالک از نام کاربری ثبت نشد: {panels.get_owner_id()}")
+        texts = [str(x[1].get("text") or "") for x in rec.requested]
+        check(any("مالک ربات" in t for t in texts),
+              f"پیام معرفی مالک نیامد: {texts[-2:]}")
+
+        # ۲) غریبه نباید مالک شود
+        other = fake_bale.make_user(555111, "غریبه", "stranger")
+        bot_main.handle({"update_id": 71002, "message": fake_bale.make_message(
+            555111, other, "سلام", chat_type="private")}, "bale")
+        check(panels.get_owner_id() == 778899, "غریبه مالک شد!")
+        check(not panels.is_bot_owner(555111), "غریبه مالک شناخته شد!")
+
+        # ۳) دستور «آیدی من» → عدد درست
+        rec.requested.clear()
+        bot_main.handle({"update_id": 71003, "message": fake_bale.make_message(
+            555111, other, "آیدی من", chat_type="private")}, "bale")
+        got = " ".join(str(x[1].get("text") or "") for x in rec.requested)
+        check("555111" in got, f"آیدی عددی در پاسخ نبود: {got[:120]}")
+        check("OWNER_ID=555111" in got, f"راهنمای env در پاسخ نبود: {got[:150]}")
+
+        # ۴) در گروه: کاربر عادی جواب نمی‌گیرد، ادمین می‌گیرد
+        def sends():
+            """فقط پیام‌های ارسالی (نه getChatMember و …)."""
+            return [r for r in rec.requested if r[0] == "sendMessage"]
+
+        import admin as admin_mod
+        admin_mod._admin_cache.clear()
+
+        rec.requested.clear()
+        GRP = -100888
+        bot_main.handle({"update_id": 71004, "message": fake_bale.make_message(
+            GRP, other, "myid")}, "bale")
+        check(not sends(), f"کاربر عادی نباید جواب بگیرد: {sends()}")
+
+        upd = {"update_id": 71005,
+               "message": fake_bale.make_message(GRP, owner, "/myid")}
+        bot_main.handle(upd, "bale")
+        new = [str(x[1].get("text") or "") for x in sends()]
+        check(any("778899" in t for t in new),
+              f"ادمین گروه آیدی‌اش را نگرفت: {sends()}")
+
+    finally:
+        config.OWNER_ID = old_uid
+        config.OWNER_USERNAME = old_uname
+        storage.set_("bot_owner", "id", {})
+    print("  ✓ «آیدی من» + ثبت مالک با نام کاربری")
+
+
+
+
 def main():
     tests = [
         ("ثبت و انتخاب پیام‌رسان", test_registry),
@@ -615,6 +745,8 @@ def main():
         ("گزارش تنظیمات", test_env_report),
         ("سرتاسری وب‌هوک", test_end_to_end_webhook),
         ("context آپدیت چند-پیام‌رسانی", test_handle_platform_context),
+        ("مالک از env (عدد/نام کاربری)", test_owner_from_env),
+        ("دستور آیدی من", test_id_command_and_owner_claim),
     ]
     print("=" * 70)
     print("تست لایه‌ی چند-پیام‌رسانی و وب‌سرور")

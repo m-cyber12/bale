@@ -18,7 +18,8 @@
 بقیه:
 
     OPENROUTER_API_KEY   کلید هوش مصنوعی (اختیاری — از پنل هم می‌شود)
-    OWNER_ID             آیدی مالک ربات
+    OWNER_ID             آیدی مالک ربات (عدد) — یا نام کاربری: @Spinner5698
+    OWNER_USERNAME       فقط نام کاربری مالک (اگر عدد را نمی‌دانی)
     DATA_DIR             پوشه‌ی داده‌ها (روی Render: مسیر دیسک)
     PORT                 اگر ست باشد، وب‌سرور سلامت/webhook بالا می‌آید
 
@@ -42,18 +43,55 @@ ADMIN_CACHE_TTL = 60
 # ============================================================
 # مالک ربات
 # ============================================================
-def _owner_id():
+def _clean_username(raw):
+    """«@Spinner5698» یا «Spinner5698» → «spinner5698»"""
+    return (raw or "").strip().lstrip("@").strip().lower()
+
+
+def _owner_from_env():
+    """(آیدی عددی، نام کاربری) مالک ربات از متغیرهای محیطی.
+
+    هر کدام از این‌ها کار می‌کند:
+        OWNER_ID=123456789
+        OWNER_ID=@Spinner5698        → نام کاربری هم قبول است
+        OWNER_USERNAME=Spinner5698
+    """
+    uid = 0
+    uname = ""
+
     for env in ("OWNER_ID", "BALE_OWNER_ID", "TELEGRAM_OWNER_ID"):
         raw = (os.environ.get(env) or "").strip()
+        if not raw:
+            continue
+        num = raw.lstrip("+").replace(" ", "")
+        if num.isdigit():
+            uid = int(num)
+            break
+        # مقدار عدد نیست → احتمالاً نام کاربری است
+        name = _clean_username(raw)
+        if name:
+            uname = name
+            print(f"[config] OWNER_ID عدد نیست ({raw!r}) → به‌عنوان نام کاربری "
+                  f"@{name} در نظر گرفته شد.")
+            break
+
+    for env in ("OWNER_USERNAME", "BALE_OWNER_USERNAME",
+                "TELEGRAM_OWNER_USERNAME", "OWNER_USER"):
+        raw = (os.environ.get(env) or "").strip()
         if raw:
-            try:
-                return int(raw)
-            except ValueError:
-                print(f"[config] {env} عدد نیست: {raw!r}")
-    return 234775012
+            uname = _clean_username(raw)
+            break
+
+    if uname and not uid:
+        print(f"[config] 👑 مالک ربات با نام کاربری @{uname} تنظیم شد — "
+              "به‌محض اولین پیام این کاربر، آیدی عددی‌اش ثبت می‌شود.")
+    if not uid and not uname:
+        print("[config] ⚠️ مالک ربات تنظیم نشده (OWNER_ID یا OWNER_USERNAME) — "
+              "اولین کسی که در پیوی به ربات پیام بدهد مالک می‌شود.")
+    return uid, uname
 
 
-OWNER_ID = _owner_id()
+OWNER_ID, OWNER_USERNAME = _owner_from_env()
 
 
 # ============================================================
@@ -144,6 +182,7 @@ def env_report():
     return {
         "data_dir": os.path.abspath(DATA_DIR),
         "owner_id": OWNER_ID,
+        "owner_username": OWNER_USERNAME,
         "platforms": [p.key for p in plats],
         "tokens_set": {p.key: bool(p.token) for p in plats},
         "openrouter_key": bool(

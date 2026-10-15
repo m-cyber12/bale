@@ -931,6 +931,99 @@ def _handle_inner(update):
         api.clear_reply_context()
 
 
+#: دستورهایی که آیدی عددی کاربر را نشان می‌دهند
+# توجه: `/id` و «آیدی» قبلاً در ربات معنی دیگری دارند (اطلاعات کاربر) —
+# پس اینجا فقط عبارت‌های بدون تداخل آمده‌اند.
+ID_COMMANDS = (
+    "آیدی من", "ایدی من", "آیدی‌من", "myid", "my_id", "my-id",
+    "whoami", "who am i", "شناسه من",
+    "/myid", "/my_id", "/whoami", "/آیدی من",
+)
+
+
+def _owner_username():
+    """نام کاربری مالک از config (پویا خوانده می‌شود تا تست‌پذیر باشد)."""
+    return (getattr(config, "OWNER_USERNAME", "") or "").strip().lstrip("@").lower()
+
+
+def _maybe_claim_owner(user, user_id, chat_id, chat_type):
+    """اگر مالک با «نام کاربری» تعریف شده باشد، همین‌جا ثبتش می‌کند.
+
+    لازم نیست کاربر آیدی عددی‌اش را بداند؛ کافی است در Render بنویسد
+    `OWNER_ID=@username` یا `OWNER_USERNAME=username`.
+    """
+    try:
+        want = _owner_username()
+        if not want:
+            return False
+        uname = (user.get("username") or "").strip().lstrip("@").lower()
+        if uname != want:
+            return False
+        if panels.get_owner_id() == user_id:
+            return False
+        panels.set_owner(user_id)
+        print(f"[owner] 👑 مالک ربات ثبت شد: {user_id} (@{uname})")
+        try:
+            api.send(chat_id,
+                "👑 **شما مالک ربات هستید**\n\n"
+                f"آیدی عددی شما: `{user_id}`\n\n"
+                "💡 برای اینکه بعد از هر دیپلوی هم پایدار بماند، همین عدد را در "
+                "Environment بگذار:\n`OWNER_ID=" + str(user_id) + "`",
+                parse_mode="Markdown", reply_to=0)
+        except Exception as e:
+            print(f"[owner:notify] {e}")
+        return True
+    except Exception as e:
+        print(f"[owner] {e}")
+        return False
+
+
+def _maybe_id_command(chat, chat_id, chat_type, user, user_id, raw_text, msg_id):
+    """دستور «آیدی من» → آیدی عددی کاربر (برای پر کردن OWNER_ID)."""
+    try:
+        cmd = (raw_text or "").strip().lower()
+        if cmd not in ID_COMMANDS:
+            return False
+        if chat_type in ("group", "supergroup"):
+            # در گروه فقط ادمین‌ها و مالک ربات (تا شلوغ نشود)
+            try:
+                from panels import is_bot_owner
+                allowed = admin.is_admin(chat_id, user_id) or is_bot_owner(user_id)
+            except Exception:
+                allowed = False
+            if not allowed:
+                return False
+        uname = (user.get("username") or "").strip()
+        try:
+            bot = api.bot_id(chat_id)
+        except Exception:
+            bot = 0
+        lines = [
+            "🆔 **آیدی شما**",
+            "",
+            f"عدد: `{user_id}`",
+        ]
+        if uname:
+            try:
+                safe = api.esc_md(uname)
+            except Exception:
+                safe = uname.replace("_", "\\_").replace("*", "\\*")
+            lines.append(f"نام کاربری: @{safe}")
+        lines += [
+            f"چت فعلی: `{chat_id}`",
+            f"آیدی ربات: `{bot}`",
+            "",
+            "💡 این عدد را در Render → Environment بگذار:",
+            "`OWNER_ID=" + str(user_id) + "`",
+        ]
+        api.send(chat_id, "\n".join(lines), parse_mode="Markdown",
+                 reply_to=msg_id)
+        return True
+    except Exception as e:
+        print(f"[id-cmd] {e}")
+        return False
+
+
 def _maybe_ai_reply(m, chat, chat_id, user_id, user_name, raw_text, msg_id):
     """ریپلای روی پیام ربات → جواب هوش مصنوعی.
 
@@ -976,6 +1069,12 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
     # ============================================
     # چت خصوصی
     # ============================================
+    # 👑 ثبت مالک با نام کاربری + دستور «آیدی من»
+    _maybe_claim_owner(user, user_id, chat_id, chat_type)
+    if _maybe_id_command(chat, chat_id, chat_type, user, user_id,
+                         raw_text, msg_id):
+        return
+
     if chat_type == "private":
         panels.register_user(user)
 
@@ -984,7 +1083,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
         except Exception as e:
             print(f"[save_profile:pv] {e}")
 
-        if not panels.get_owner_id():
+        if not panels.get_owner_id() and not _owner_username():
             panels.set_owner(user_id)
             api.send(chat_id, f"👑 شما به عنوان مالک ربات ثبت شدید.\nآیدی: `{user_id}`", parse_mode="Markdown")
 
@@ -2615,7 +2714,7 @@ def _process_message(m, chat, chat_id, chat_type, user, user_id, user_name,
         return
 
     if cmd == "/کلیدai":
-        if user_id != OWNER_ID:
+        if not panels.is_bot_owner(user_id):
             api.send(chat_id, "👑 فقط مالک ربات.", reply_to=0)
             return
         if not args or not args[0].startswith("sk-"):

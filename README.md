@@ -39,7 +39,7 @@
 export BALE_TOKEN="123456:ABC..."          # توکن ربات
 export TELEGRAM_TOKEN="789:XYZ..."         # اختیاری
 export OPENROUTER_API_KEY="sk-or-v1-..."   # اختیاری (هوش مصنوعی)
-export OWNER_ID="234775012"                # آیدی عددی خودت
+export OWNER_ID="123456789"                 # آیدی عددی خودت (یا: OWNER_USERNAME=Spinner5698)
 python3 main.py
 ```
 
@@ -63,7 +63,8 @@ export PLATFORMS="webhook"           # فقط وب‌هوک (پیام‌رسان
 | `WEBHOOK_SEND_URL` | آدرس ارسال برای پیام‌رسان دلخواه |
 | `PLATFORMS` / `PLATFORM` | کدام پیام‌رسان‌ها فعال باشند |
 | `OPENROUTER_API_KEY` | کلید هوش مصنوعی (اولویت بر کلید پنل) |
-| `OWNER_ID` | آیدی مالک ربات |
+| `OWNER_ID` | آیدی عددی مالک ربات — در پیوی ربات بنویس «آیدی من» تا بگیری |
+| `OWNER_USERNAME` | جایگزین `OWNER_ID`: فقط نام کاربری مالک (مثلاً `Spinner5698`) |
 | `DATA_DIR` | پوشه‌ی داده‌ها (روی Render با دیسک: `/var/data`) |
 | `PORT` | اگر ست باشد، وب‌سرور سلامت/webhook بالا می‌آید |
 
