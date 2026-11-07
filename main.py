@@ -11,6 +11,7 @@ from handlers_callback import handle_callback
 from handlers_message import handle_message
 from handlers_payment import handle_pre_checkout_query, handle_successful_payment
 from performance import init_performance, processor, get_stats
+from web_panel import start_web_panel
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -443,4 +444,5 @@ def main():
 
 
 if __name__ == "__main__":
+    start_web_panel()
     main()
