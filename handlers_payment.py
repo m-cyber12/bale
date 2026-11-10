@@ -29,6 +29,18 @@ def handle_pre_checkout_query(update):
     print(f"💰 PRE_CHECKOUT → user={user_id} | payload={payload} | "
           f"amount={total} {currency}")
 
+    if currency != PAYMENT_CURRENCY:
+        answer_pre_checkout_query(pcq_id, False, "❌ واحد پول نامعتبر است.")
+        return
+
+    # Payloads created by the bot contain the buyer ID and timestamp.
+    if payload.startswith(("world_pass_", "subscription_")):
+        prefix = "world_pass_" if payload.startswith("world_pass_") else "subscription_"
+        parts = payload[len(prefix):].split("_")
+        if len(parts) != 2 or parts[0] != user_id or not parts[1].isdigit():
+            answer_pre_checkout_query(pcq_id, False, "❌ اطلاعات خریدار نامعتبر است.")
+            return
+
     # ==================== تشخیص نوع پرداخت ====================
     if payload.startswith("world_pass_"):
         expected = WORLD_PASS_PRICE_RIAL
@@ -38,7 +50,7 @@ def handle_pre_checkout_query(update):
         ptype = "subscription"
     elif payload.startswith("item_"):
         parts = payload.split("_")
-        if len(parts) < 5:
+        if len(parts) != 5 or not parts[4].isdigit():
             answer_pre_checkout_query(pcq_id, False, "❌ داده نامعتبر.")
             print(f"❌ Invalid item payload: {payload}")
             return
@@ -62,6 +74,9 @@ def handle_pre_checkout_query(update):
             return
 
         pack = ITEM_PACKS[key]
+        if not pack["min_qty"] <= qty <= pack["max_qty"]:
+            answer_pre_checkout_query(pcq_id, False, "❌ تعداد نامعتبر است.")
+            return
         expected = pack["price_per_unit"] * qty * 10  # تومان → ریال
         ptype = "item"
     else:
@@ -281,7 +296,7 @@ def handle_successful_payment(update):
     # ==================== 💳 خرید آیتم ====================
     if payload.startswith("item_"):
         parts = payload.split("_")
-        if len(parts) < 5:
+        if len(parts) != 5 or not parts[4].isdigit():
             print(f"❌ Invalid item payload on success: {payload}")
             return
         try:
@@ -297,6 +312,17 @@ def handle_successful_payment(update):
             return
 
         pack = ITEM_PACKS[key]
+        if (not pack["min_qty"] <= qty <= pack["max_qty"]
+                or currency != PAYMENT_CURRENCY
+                or total != pack["price_per_unit"] * qty * 10):
+            print(f"❌ Invalid item payment details for user {user_id}; manual review required")
+            return
+        payment_id = charge_id or provider_charge
+        if payment_id and payment_id in p.get("processed_item_payments", []):
+            print(f"⚠️ Duplicate item payment ignored: {payment_id}")
+            return
+        if not payment_id:
+            print(f"⚠️ Item payment has no charge ID; cannot deduplicate user {user_id}")
         reward = pack["reward_per_unit"] * qty
         db[user_id]["item_buy_pending_invoice"] = 0
 
@@ -329,6 +355,8 @@ def handle_successful_payment(update):
         else:
             success_msg = f"🎉 جایزه اضافه شد!"
 
+        if payment_id:
+            p.setdefault("processed_item_payments", []).append(payment_id)
         save_db_now()
 
         try:

@@ -39,8 +39,11 @@ class UpdateProcessor:
         try:
             uid = self._extract_uid(update)
 
+            # Payment confirmations must never be discarded by spam limits.
+            is_payment = "successful_payment" in update.get("message", {})
+
             # 1) user rate: فقط برای اسپم واقعی (30/s برای هر کاربر)
-            if uid and not user_rate.allow(uid):
+            if not is_payment and uid and not user_rate.allow(uid):
                 with self._lock:
                     self.dropped += 1
                 return
@@ -49,7 +52,7 @@ class UpdateProcessor:
             with self._lock:
                 is_loaded = self.active >= (self.executor._max_workers - 2)
 
-            if is_loaded and not global_rate.allow():
+            if not is_payment and is_loaded and not global_rate.allow():
                 with self._lock:
                     self.dropped += 1
                 return
