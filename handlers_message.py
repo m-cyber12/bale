@@ -219,12 +219,10 @@ def handle_message(update):
         shop_text = build_shop_text(user_id)
         shop_kb = build_shop_keyboard()
 
+        # Inline menus are edited as text; keep the decorative photo separate.
         if SHOP_PHOTO:
-            result = send_photo(chat_id, SHOP_PHOTO, caption=shop_text, reply_markup=shop_kb)
-            if not result.get("ok"):
-                send_message(chat_id, shop_text, reply_markup=shop_kb)
-        else:
-            send_message(chat_id, shop_text, reply_markup=shop_kb)
+            send_photo(chat_id, SHOP_PHOTO)
+        send_message(chat_id, shop_text, reply_markup=shop_kb)
         return
 
     if text in ["🛒 World Shop", "World Shop", "world shop"]:

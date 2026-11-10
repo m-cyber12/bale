@@ -214,7 +214,23 @@ def handle_callback(update):
         show_alert(cb_id, "🚫 شما مسدود هستید!", True)
         return
 
+    # Older shop menus were sent as photo captions. Migrate them on the
+    # first click so the rest of navigation uses an editable text message.
+    if cb["message"].get("photo") and (data.startswith("shop_") or data == "help_shop"):
+        result = send_message(chat_id, build_shop_text(user_id), build_shop_keyboard())
+        if result.get("ok") and isinstance(result.get("result"), dict):
+            new_id = result["result"].get("message_id")
+            if new_id is not None:
+                msg_id = new_id
+
     db[user_id]["last_active"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Acknowledge navigation callbacks so the client stops its loading indicator.
+    if data in {"shop_missile", "shop_defense", "shop_talisman", "shop_drone",
+                "shop_back", "help_shop", "go_start"} or data in {
+                    "shop_cruise", "shop_ballistic", "shop_hypersonic",
+                    "shop_chemical", "shop_nuclear"}:
+        show_alert(cb_id, "", False)
 
     # ==================== Join Check ====================
     if data == "check_join":
@@ -235,7 +251,7 @@ def handle_callback(update):
     # ==================== Navigation ====================
     if data in ("go_main", "go_start"):
         from handlers import reply_keyboard
-        edit_message(chat_id, msg_id, "🔻 منوی اصلی:", reply_keyboard)
+        send_message(chat_id, "🔻 منوی اصلی:", reply_keyboard)
         return
 
     if data == "go_resources":
